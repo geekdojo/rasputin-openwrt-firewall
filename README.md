@@ -38,8 +38,13 @@ Known scaffold-stage shortcuts (all flagged for follow-up):
 - **WAN/LAN port assignment defaults to eth0=WAN / eth1=LAN.** Real Node N
   chassis labeling may differ; `uci-defaults/99-rasputin` is the place to
   flip if needed.
-- **Suricata is installed but not enabled.** Tap-mode IDS configuration
-  needs a real WAN tap; default-off keeps boot clean.
+- **No IDS in v1 scaffold.** Suricata — the design's preferred IDS — was
+  dropped from the OpenWrt packages feed in 24.10 (verified 2026-05-30:
+  gone from `/releases/24.10.0/packages/x86_64/**` and from snapshots).
+  Open call between (a) ship Snort3 (the only inline-IDS package
+  remaining in 24.10), (b) build Suricata via the OpenWrt SDK, or
+  (c) defer to a controlplane-delivered IDS container. Tracked in
+  `backlog.md` under firewall.
 - **No A/B sysupgrade.** Bad image = re-flash via USB. Documented v1
   limitation ([firewall-image.md §5](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/firewall-image.md)).
 
