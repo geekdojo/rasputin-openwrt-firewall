@@ -226,8 +226,16 @@ jobs:
           # bootable standalone.
           IMG_GZ=$(ls img/*combined-efi*.img.gz | head -1)
           test -n "$IMG_GZ" || { echo "no combined-efi .img.gz artifact"; exit 1; }
-          gunzip -k "$IMG_GZ"
           IMG=${IMG_GZ%.gz}
+          # OpenWrt's combined-efi .img.gz has trailing NUL padding after the
+          # gzip stream (raw-image alignment). gunzip decompresses correctly
+          # but exits 2 ("trailing garbage ignored"). Tolerate exit 2; only
+          # fail on real errors or a missing output file.
+          gunzip -kf "$IMG_GZ" || rc=$?
+          if [ "${rc:-0}" -ne 0 ] && [ "${rc:-0}" -ne 2 ]; then
+            echo "::error::gunzip failed with rc=${rc}"; exit "${rc}"
+          fi
+          [ -s "$IMG" ] || { echo "::error::decompressed image $IMG missing or empty"; exit 1; }
           # Auto-pick non-secboot OVMF (Ubuntu renamed the files to _4M).
           OVMF_CODE=$(ls /usr/share/OVMF/OVMF_CODE*.fd 2>/dev/null | grep -v secboot | head -1)
           OVMF_VARS=$(ls /usr/share/OVMF/OVMF_VARS*.fd 2>/dev/null | grep -v secboot | head -1)
