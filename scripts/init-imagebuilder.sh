@@ -18,7 +18,10 @@ set -euo pipefail
 OPENWRT_VERSION="${OPENWRT_VERSION:-24.10.0}"
 TARGET="x86/64"
 TARGET_DIR="$(echo "$TARGET" | tr / -)"   # x86-64
-IB_TARBALL="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET_DIR}.Linux-x86_64.tar.xz"
+# OpenWrt switched ImageBuilder distribution from .tar.xz → .tar.zst in 24.10
+# (https://forum.openwrt.org/t/openwrt-24-10-0-stable-released/ — zstd is
+# faster and smaller). xz upstream artifacts no longer exist for 24.10+.
+IB_TARBALL="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET_DIR}.Linux-x86_64.tar.zst"
 IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${IB_TARBALL}"
 
 # The release dir publishes sha256sums for everything. Pull + verify.
@@ -60,7 +63,14 @@ echo "  sha256 ok"
 
 echo "→ extracting to ./imagebuilder/"
 cd ..
-tar -xJf ".imagebuilder-dl/$IB_TARBALL"
+# --zstd needs the `zstd` binary on PATH (GNU tar passes it as the compress
+# program). ubuntu-latest ships it; on macOS install via `brew install zstd`.
+if ! command -v zstd >/dev/null 2>&1; then
+	echo "ERROR: zstd not installed (needed to extract OpenWrt 24.10+ ImageBuilder)" >&2
+	echo "  Linux: apt-get install -y zstd     macOS: brew install zstd"            >&2
+	exit 1
+fi
+tar --zstd -xf ".imagebuilder-dl/$IB_TARBALL"
 mv "openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET_DIR}.Linux-x86_64" imagebuilder
 rm -rf .imagebuilder-dl
 
