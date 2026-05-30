@@ -147,8 +147,16 @@ jobs:
           PROFILE: generic
         run: |
           set -euo pipefail
-          # Strip comments + blank lines from packages.txt → space-separated.
-          pkgs=$(grep -v '^[[:space:]]*#' packages.txt | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          # Build the PACKAGES list from packages.txt:
+          #   1. sed strips trailing inline `# ...` comments per line. Without
+          #      this, bash treats embedded `(...)` in a comment as a subshell
+          #      and `make image PACKAGES='...'` blows up.
+          #   2. grep removes the now-empty / whitespace-only lines (full-line
+          #      comments become empty after step 1).
+          #   3. tr collapses to a single space-separated list.
+          pkgs=$(sed 's/[[:space:]]*#.*$//' packages.txt \
+                 | grep -vE '^[[:space:]]*$' \
+                 | tr '\n' ' ')
           echo "PACKAGES: $pkgs"
           files_abs=$(realpath files)
           # ImageBuilder's `make image` is the one-shot entrypoint.
