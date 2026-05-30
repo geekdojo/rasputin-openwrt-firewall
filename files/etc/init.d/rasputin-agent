@@ -1,0 +1,50 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-agent — procd service for the Rasputin firewall agent.
+# Started by procd after networking is up; auto-restarted on crash.
+#
+# Config: /etc/config/rasputin (UCI). Written by uci-defaults/99-rasputin
+# on first boot from /etc/rasputin/seed.env.
+
+USE_PROCD=1
+START=90            # after network (S20-S40), firewall (S19), dnsmasq (S60)
+STOP=10
+
+start_service() {
+	# Read UCI config (set by uci-defaults/99-rasputin from the seed).
+	. /lib/functions.sh
+	config_load rasputin
+	local nats_url join_token node_role node_id
+	config_get nats_url   main nats_url
+	config_get join_token main join_token
+	config_get node_role  main node_role  firewall
+	config_get node_id    main node_id
+
+	# If the operator hasn't filled the seed yet, log + back off — procd
+	# will respawn on the configured cadence. Avoid a tight crash loop.
+	if [ -z "$nats_url" ] || [ -z "$join_token" ]; then
+		logger -t rasputin-agent "seed not configured (nats_url or join_token blank); sleeping 60s"
+		sleep 60
+		exit 1
+	fi
+
+	procd_open_instance
+	procd_set_param command /usr/bin/rasputin-agent
+	procd_append_param env RASPUTIN_NODE_ROLE="$node_role"
+	procd_append_param env RASPUTIN_NATS_URL="$nats_url"
+	procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
+	[ -n "$node_id" ] && procd_append_param env RASPUTIN_NODE_ID="$node_id"
+	# Trust root for verifying signed update images before sysupgrade.
+	procd_append_param env RASPUTIN_TRUST_ROOT=/etc/rasputin/trust/root-ca.pem
+
+	procd_set_param respawn 3600 5 10   # threshold/timeout/retry (procd defaults shape)
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+service_triggers() {
+	# Restart the agent when the UCI config changes (e.g. operator
+	# updates NATS URL via LuCI or a `uci set` from the controlplane).
+	procd_add_reload_trigger rasputin
+}

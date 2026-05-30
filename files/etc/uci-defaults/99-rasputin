@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# 99-rasputin — first-boot UCI seed for the Rasputin firewall.
+#
+# Runs once on the first boot (uci-defaults scripts execute in order then
+# self-delete on exit 0 — the canonical OpenWrt seed mechanism, analogous
+# to the Buildroot firstboot oneshot in os-images/provisioning.md).
+#
+# What it does:
+#   1. Reads /etc/rasputin/seed.env (NATS URL, join token, role).
+#   2. Writes /etc/config/rasputin (the UCI config the agent reads).
+#   3. Configures WAN/LAN port assignment for the i226-V dual NIC.
+#   4. Enables nftables software flowtable offload.
+#   5. Enables (but does not start) Suricata.
+#   6. Enables the rasputin-agent service to start on subsequent boots.
+#
+# Exit non-zero → uci-defaults re-runs this on next boot. We use that to
+# defer provisioning until the seed has a NATS URL and join token.
+
+set -eu
+
+SEED=/etc/rasputin/seed.env
+if [ ! -f "$SEED" ]; then
+	logger -t rasputin "99-rasputin: $SEED not found; deferring (re-runs next boot)"
+	exit 1
+fi
+
+# shellcheck disable=SC1090
+. "$SEED"
+
+if [ -z "${RASPUTIN_NATS_URL:-}" ] || [ -z "${RASPUTIN_CP_JOIN_TOKEN:-}" ]; then
+	logger -t rasputin "99-rasputin: seed not yet populated (RASPUTIN_NATS_URL or RASPUTIN_CP_JOIN_TOKEN blank); deferring"
+	exit 1
+fi
+
+logger -t rasputin "99-rasputin: applying first-boot UCI seed"
+
+# --- /etc/config/rasputin (consumed by /etc/init.d/rasputin-agent) ---
+uci -q batch <<EOF
+delete rasputin.main
+set rasputin.main='rasputin'
+set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
+set rasputin.main.nats_url='${RASPUTIN_NATS_URL}'
+set rasputin.main.join_token='${RASPUTIN_CP_JOIN_TOKEN}'
+set rasputin.main.node_id='$(cat /sys/class/dmi/id/board_serial 2>/dev/null || cat /etc/machine-id)'
+commit rasputin
+EOF
+
+# --- WAN/LAN port assignment (eth0=WAN, eth1=LAN by default) ---
+# Real Node N chassis labeling may differ — flip the device names here if
+# the labeled WAN port is physically eth1. Both ports are kmod-igc (i226-V).
+uci -q batch <<'EOF'
+set network.wan=interface
+set network.wan.device='eth0'
+set network.wan.proto='dhcp'
+delete network.lan.device
+add_list network.lan.ports='eth1'
+commit network
+EOF
+
+# --- nftables software flowtable offload (the i226-V tier has no HW offload) ---
+uci -q batch <<'EOF'
+set firewall.@defaults[0].flow_offloading='1'
+set firewall.@defaults[0].flow_offloading_hw='0'
+commit firewall
+EOF
+
+# --- Enable services (do not start yet — uci-defaults runs pre-procd) ---
+/etc/init.d/rasputin-agent enable
+/etc/init.d/suricata enable        2>/dev/null || true   # not installed → silent
+
+logger -t rasputin "99-rasputin: provisioning complete; exit 0 so uci-defaults removes me"
+exit 0

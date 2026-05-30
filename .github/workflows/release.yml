@@ -1,0 +1,377 @@
+name: release
+
+# Build + sign + ship the Rasputin firewall (Node N) OpenWrt image.
+#
+# Mirror of rasputin-os's release workflow but adapted for OpenWrt:
+#   - ImageBuilder, not Buildroot (~5-10 min build, not 50 min)
+#   - sysupgrade .img.gz, not RAUC .raucb
+#   - detached CMS .sig signature, verified by rasputin-agent on the
+#     device before invoking sysupgrade (same YubiKey-rooted PKI as
+#     rasputin-os; see os-images/release-pipeline.md §3)
+#
+# Triggers:
+#   - push of a CalVer tag (e.g. 2026.06.0 or 2026.06.0-dev.1)
+#                                       → validate + build + smoke + sign+release
+#   - manual dispatch (full_build=true) → validate + build + smoke (no release)
+#   - manual dispatch (full_build=false) → validate only (default, cheap)
+
+on:
+  push:
+    tags:
+      - "[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9]*"
+  workflow_dispatch:
+    inputs:
+      full_build:
+        description: "Run the ImageBuilder build + smoke (defaults to validate-only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # create releases + upload assets
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell script syntax
+        run: |
+          set -e
+          for f in scripts/*.sh \
+                   files/etc/init.d/* \
+                   files/etc/uci-defaults/*; do
+            test -f "$f" || continue
+            echo "bash -n $f"; bash -n "$f"
+          done
+      - name: Repo structure
+        run: |
+          set -e
+          req="README.md packages.txt scripts/init-imagebuilder.sh
+               files/etc/init.d/rasputin-agent
+               files/etc/uci-defaults/99-rasputin
+               files/etc/rasputin/seed.env.template
+               files/etc/rasputin/trust/README.md"
+          for f in $req; do
+            test -f "$f" && echo "ok  $f" || { echo "MISSING $f" >&2; exit 1; }
+          done
+
+  build:
+    needs: validate
+    # full_build arrives as a real boolean from the UI checkbox but as the
+    # STRING "true" via the API / `gh -f`. Accept both. (Same gotcha as
+    # rasputin-os.)
+    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version (CalVer)
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            case "${GITHUB_REF_NAME}" in
+              *-dev*) echo "channel=dev"    >> "$GITHUB_OUTPUT" ;;
+              *)      echo "channel=stable" >> "$GITHUB_OUTPUT" ;;
+            esac
+          else
+            echo "version=$(date -u +%Y.%m.0)-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "channel=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Free space — ImageBuilder + downloaded packages comfortably fit on
+      # a stock runner, but Suricata pulls in a sizable rule set and the
+      # output image dir grows. Cheap insurance.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          df -h /
+
+      # Cache the extracted ImageBuilder dir + the OpenWrt package
+      # downloads it pulls during `make image`. Warm rebuilds skip the
+      # ~200 MB IB tarball download AND the per-package downloads → a
+      # warm CI run is ~3 min instead of ~10. Split restore/save with
+      # if:always() so failed builds still warm the cache (same pattern
+      # as rasputin-os).
+      - name: Restore ImageBuilder + dl cache
+        id: ibcache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            imagebuilder
+            imagebuilder/dl
+          key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
+          restore-keys: ib-
+
+      - name: Init OpenWrt ImageBuilder (download if not cached)
+        run: ./scripts/init-imagebuilder.sh
+
+      # The agent binary lives in a PRIVATE control-plane release; same
+      # auth dance as rasputin-os (fine-grained PAT, Contents:read on
+      # geekdojo/rasputin-control-plane). The amd64 binary works on
+      # OpenWrt's musl since rasputin-agent is CGO_ENABLED=0 static Go.
+      - name: Fetch vendored rasputin-agent (private control-plane release)
+        env:
+          GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Pinned agent version. Bump when the controlplane cuts a new
+          # release; in the longer term this becomes a per-release input.
+          VER=0.1.0
+          mkdir -p /tmp/agent files/usr/bin
+          gh release download "v$VER" \
+            --repo geekdojo/rasputin-control-plane \
+            --pattern "rasputin-agent-${VER}-linux-amd64.tar.gz" \
+            --dir /tmp/agent --clobber
+          tar -xzf /tmp/agent/rasputin-agent-${VER}-linux-amd64.tar.gz \
+            -C files/usr/bin
+          chmod +x files/usr/bin/rasputin-agent
+          file files/usr/bin/rasputin-agent | head -1
+
+      - name: Inject trust root from org variable
+        run: |
+          mkdir -p files/etc/rasputin/trust
+          printf '%s' "${{ vars.RASPUTIN_ROOT_CA_PEM }}" \
+            > files/etc/rasputin/trust/root-ca.pem
+          if [ ! -s files/etc/rasputin/trust/root-ca.pem ]; then
+            echo "::warning::RASPUTIN_ROOT_CA_PEM org variable is empty — image will ship without a verifiable trust root"
+          fi
+
+      - name: ImageBuilder build
+        env:
+          PROFILE: generic
+        run: |
+          set -euo pipefail
+          # Strip comments + blank lines from packages.txt → space-separated.
+          pkgs=$(grep -v '^[[:space:]]*#' packages.txt | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          echo "PACKAGES: $pkgs"
+          files_abs=$(realpath files)
+          # ImageBuilder's `make image` is the one-shot entrypoint.
+          cd imagebuilder
+          make image \
+            PROFILE="$PROFILE" \
+            PACKAGES="$pkgs" \
+            FILES="$files_abs" \
+            EXTRA_IMAGE_NAME=rasputin \
+            -j"$(nproc)"
+          echo
+          echo "----- output artifacts -----"
+          ls -lh bin/targets/x86/64/
+
+      - name: Save ImageBuilder + dl cache
+        if: always() && steps.ibcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            imagebuilder
+            imagebuilder/dl
+          key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
+
+      - name: Stage release-shaped names + upload artifact
+        run: |
+          set -euo pipefail
+          mkdir -p staged
+          ver="${{ steps.ver.outputs.version }}"
+          # ImageBuilder names the combined image something like
+          # openwrt-24.10.0-x86-64-rasputin-generic-ext4-combined-efi.img.gz
+          # and a sysupgrade variant. Pick the combined-efi (flashable)
+          # one + the sysupgrade one.
+          for src in imagebuilder/bin/targets/x86/64/*combined-efi*.img.gz \
+                     imagebuilder/bin/targets/x86/64/*sysupgrade*.img.gz; do
+            [ -f "$src" ] || continue
+            kind=$(basename "$src" | grep -oE 'combined-efi|sysupgrade')
+            cp "$src" "staged/rasputin-fw-n100-${ver}-${kind}.img.gz"
+          done
+          ls -lh staged/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-n100-${{ steps.ver.outputs.version }}
+          path: staged/*.img.gz
+
+  smoke-fw:
+    needs: build
+    # Run as long as the workflow wasn't cancelled. Boots the combined-efi
+    # image under QEMU+OVMF and waits for OpenWrt's procd banner / login
+    # prompt — that's enough to confirm the image isn't structurally broken.
+    # It does NOT validate the i226-V driver, line-rate, or NAT — that's
+    # hardware-only.
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true'))) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install QEMU + OVMF
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-n100-*
+          merge-multiple: true
+          path: img
+      - name: Boot headless, wait for OpenWrt banner
+        run: |
+          set -x
+          # Pick the combined-efi (flashable) variant; sysupgrade isn't
+          # bootable standalone.
+          IMG_GZ=$(ls img/*combined-efi*.img.gz | head -1)
+          test -n "$IMG_GZ" || { echo "no combined-efi .img.gz artifact"; exit 1; }
+          gunzip -k "$IMG_GZ"
+          IMG=${IMG_GZ%.gz}
+          # Auto-pick non-secboot OVMF (Ubuntu renamed the files to _4M).
+          OVMF_CODE=$(ls /usr/share/OVMF/OVMF_CODE*.fd 2>/dev/null | grep -v secboot | head -1)
+          OVMF_VARS=$(ls /usr/share/OVMF/OVMF_VARS*.fd 2>/dev/null | grep -v secboot | head -1)
+          cp "$OVMF_VARS" /tmp/vars.fd
+          ( timeout 240 qemu-system-x86_64 \
+              -machine q35 -m 512 -smp 2 -cpu max -nographic \
+              -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+              -drive if=pflash,format=raw,file=/tmp/vars.fd \
+              -drive file="$IMG",format=raw,if=virtio \
+              -serial mon:stdio > /tmp/console.log 2>&1 ) &
+          QPID=$!
+          ok=0
+          for _ in $(seq 1 100); do
+            if grep -qE "Please press Enter to activate this console|BusyBox v[0-9]|procd: - init complete -" /tmp/console.log; then
+              ok=1; break
+            fi
+            sleep 2
+          done
+          kill "$QPID" 2>/dev/null || true
+          echo "----- last 80 lines of console -----"; tail -80 /tmp/console.log || true
+          [ "$ok" = 1 ] || { echo "::error::firewall image did not reach OpenWrt banner in QEMU"; exit 1; }
+          echo "OpenWrt firewall image booted in QEMU"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-fw-console
+          path: /tmp/console.log
+
+  sign-and-release:
+    needs: [build, smoke-fw]
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version
+        id: ver
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          case "$VERSION" in
+            *-dev*) CHANNEL=dev    ; PRERELEASE=true  ;;
+            *)      CHANNEL=stable ; PRERELEASE=false ;;
+          esac
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL"       >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-n100-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Materialise signing material to tmpfs
+        env:
+          LEAF_KEY:  ${{ secrets.RASPUTIN_LEAF_KEY }}
+          LEAF_CERT: ${{ secrets.RASPUTIN_LEAF_CERT }}
+          ROOT_PEM:  ${{ vars.RASPUTIN_ROOT_CA_PEM }}
+        run: |
+          set -eu
+          if [ -z "${LEAF_KEY:-}" ] || [ -z "${LEAF_CERT:-}" ] || [ -z "${ROOT_PEM:-}" ]; then
+            echo "::error::missing one of RASPUTIN_LEAF_KEY / RASPUTIN_LEAF_CERT (repo secrets) or RASPUTIN_ROOT_CA_PEM (org variable)"; exit 1
+          fi
+          sudo mkdir -p /mnt/rasputin-sign
+          sudo mount -t tmpfs -o size=8M,mode=0700,uid=$(id -u),gid=$(id -g) tmpfs /mnt/rasputin-sign
+          umask 077
+          printf '%s' "$LEAF_KEY"  > /mnt/rasputin-sign/leaf.key
+          printf '%s' "$LEAF_CERT" > /mnt/rasputin-sign/leaf-chain.pem
+          printf '%s' "$ROOT_PEM"  > /mnt/rasputin-sign/root-ca.pem
+          # Split leaf-chain into leaf + intermediate (same pattern as
+          # rasputin-os; CMS signing needs them separately).
+          awk -v leaf=/mnt/rasputin-sign/leaf.pem \
+              -v inter=/mnt/rasputin-sign/intermediate.pem \
+              '/-----BEGIN CERTIFICATE-----/{i++} {if(i==1)print > leaf; else if(i==2)print > inter}' \
+              /mnt/rasputin-sign/leaf-chain.pem
+          openssl verify -CAfile /mnt/rasputin-sign/root-ca.pem \
+            -untrusted /mnt/rasputin-sign/intermediate.pem \
+            /mnt/rasputin-sign/leaf.pem \
+            || { echo "::error::leaf cert chain does not verify against root"; exit 1; }
+
+      - name: CMS-sign images + emit manifest.json
+        run: |
+          set -eu
+          mkdir -p release-out
+          : > /tmp/manifest-artifacts.jsonl
+          ver="${{ steps.ver.outputs.version }}"
+          for img in artifacts/*.img.gz; do
+            [ -f "$img" ] || continue
+            name=$(basename "$img")
+            cp "$img" "release-out/$name"
+            sig="release-out/${name}.sig"
+            # Detached CMS signature, DER format. The rasputin-agent on
+            # the device verifies with:
+            #   openssl cms -verify -binary -inform DER \
+            #     -in <sig> -content <img.gz> \
+            #     -CAfile /etc/rasputin/trust/root-ca.pem
+            openssl cms -sign -binary \
+              -in "release-out/$name" \
+              -signer  /mnt/rasputin-sign/leaf.pem \
+              -certfile /mnt/rasputin-sign/intermediate.pem \
+              -inkey   /mnt/rasputin-sign/leaf.key \
+              -outform DER \
+              -out "$sig"
+
+            sha=$(sha256sum "release-out/$name" | awk '{print $1}')
+            sigsha=$(sha256sum "$sig"            | awk '{print $1}')
+            sz=$(stat -c%s "release-out/$name")
+            sigsz=$(stat -c%s "$sig")
+            kind=$(echo "$name" | grep -oE 'combined-efi|sysupgrade')
+            built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+            jq -nc \
+              --arg sku fw-n100 --arg arch amd64 \
+              --arg compatible rasputin-fw-n100 \
+              --arg kind "$kind" \
+              --arg image "$name"            --arg sha "$sha"    --argjson sz "$sz" \
+              --arg sig   "$(basename "$sig")" --arg sigsha "$sigsha" --argjson sigsz "$sigsz" \
+              --arg signedBy "Rasputin Release ${ver}" --arg built "$built" \
+              '{sku:$sku, architecture:$arch, compatible:$compatible, kind:$kind,
+                image:$image, sha256:$sha, sizeBytes:$sz,
+                sig:$sig, sigSha256:$sigsha, sigSizeBytes:$sigsz,
+                signedBy:$signedBy, buildDate:$built}' \
+              >> /tmp/manifest-artifacts.jsonl
+          done
+
+          jq -n \
+            --arg version "${{ steps.ver.outputs.version }}" \
+            --arg channel "${{ steps.ver.outputs.channel }}" \
+            --slurpfile artifacts /tmp/manifest-artifacts.jsonl \
+            '{version:$version, channel:$channel, artifacts:$artifacts}' \
+            > release-out/manifest.json
+
+          echo "----- release-out/ -----" && ls -lh release-out/
+          echo "----- manifest.json -----" && cat release-out/manifest.json
+
+      - name: Wipe signing material
+        if: always()
+        run: sudo umount /mnt/rasputin-sign 2>/dev/null || true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          PRERELEASE_FLAG=""
+          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "${{ steps.ver.outputs.version }}" \
+            --title "Rasputin Firewall ${{ steps.ver.outputs.version }}" \
+            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Verify each image's signature with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <image>.img.gz.sig -content <image>.img.gz -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`." \
+            $PRERELEASE_FLAG \
+            release-out/*

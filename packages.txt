@@ -1,0 +1,33 @@
+# Packages added to (or removed from, via leading `-`) the OpenWrt
+# x86/64 generic image. Passed verbatim to `make image PACKAGES=...`.
+# Order doesn't matter; one per line; `#` comments stripped at use time.
+#
+# Source of truth: os-images/firewall-image.md §2.
+
+# --- Web UI ---
+luci-ssl                 # LuCI over HTTPS (uhttpd + ustream-ssl)
+
+# --- Tunneling ---
+wireguard-tools          # WireGuard userspace (kmod is implicit in modern OpenWrt)
+
+# --- Firewall + NAT ---
+nftables                 # already default in modern OpenWrt; explicit for clarity
+kmod-nft-offload         # nftables software flowtable offload (no HW offload on i226-V)
+
+# --- NIC driver ---
+kmod-igc                 # Intel i226-V driver (Node N's dual 2.5GbE)
+
+# --- DNS: swap base dnsmasq → dnsmasq-full (DNSSEC + ipset support) ---
+-dnsmasq
+dnsmasq-full
+
+# --- IDS (tap mode only — N100 does NOT do inline IPS at line rate) ---
+# Installed but not enabled by default; configuration is post-flash.
+suricata
+
+# --- rasputin-agent ---
+# NOT listed here. v1 scaffold delivers the binary via files/usr/bin/
+# overlay (fetched authed from rasputin-control-plane release). The
+# design's eventual model is a custom usign-signed feed exposing
+# `rasputin-agent` as an .apk; that lands when we wire OTA from the
+# controlplane. (firewall-image.md §3, README "Status".)

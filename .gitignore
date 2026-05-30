@@ -1,0 +1,29 @@
+# OpenWrt ImageBuilder is downloaded by scripts/init-imagebuilder.sh — large
+# (~200 MB), reproducible from the pinned version, do not commit.
+/imagebuilder/
+
+# Build outputs
+/build/
+/dist/
+*.img
+*.img.gz
+*.img.xz
+*.sig
+
+# Vendored agent binary — authenticated-fetched at build time from
+# rasputin-control-plane release; never committed.
+/files/usr/bin/rasputin-agent
+
+# Trust root injected by CI from vars.RASPUTIN_ROOT_CA_PEM
+/files/etc/rasputin/trust/root-ca.pem
+
+# Per-deployment provisioning seed (the .template is committed; bare name
+# holds per-fleet secrets once filled).
+/files/etc/rasputin/seed.env
+
+# OS noise
+.DS_Store
+
+# Signing material that must never be committed
+*.key
+*.pem
