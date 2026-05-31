@@ -20,12 +20,19 @@ files overlay — minutes, not hours).
 
 ## Status
 
-**Scaffold (2026-05-30).** Repo structure + CI in place but **not yet
-hardware-validated** — the boards haven't arrived. The build target is
-OpenWrt x86/64 generic profile, `EXTRA_IMAGE_NAME=rasputin`, packages per
+**Scaffold green in CI (2026-05-30).** Repo wired end-to-end —
+validate → ImageBuilder build (~3 min cold) → QEMU/OVMF boot smoke →
+tag-gated CMS sign + GitHub Release. First fully green run:
+[`26699332725`](https://github.com/geekdojo/rasputin-openwrt-firewall/actions/runs/26699332725).
+The image reaches OpenWrt's `procd: - init -` / `Please press Enter to
+activate this console` under QEMU; **real Node N hardware validation is
+pending board arrival** before the first signed CalVer tag is cut.
+
+The build target is OpenWrt 24.10.0 x86/64 generic profile,
+`EXTRA_IMAGE_NAME=rasputin`, packages per
 [firewall-image.md §2](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/firewall-image.md).
-CI runs ImageBuilder → optional QEMU smoke → CMS-sign the `.img.gz` with
-the same YubiKey-rooted PKI as `rasputin-os` → publish to GitHub Releases.
+The signing pipeline uses the same YubiKey-rooted PKI as `rasputin-os`
+(root → intermediate → CI-secret leaf, detached CMS `.sig` per `.img.gz`).
 
 Known scaffold-stage shortcuts (all flagged for follow-up):
 
