@@ -185,16 +185,21 @@ jobs:
           set -euo pipefail
           mkdir -p staged
           ver="${{ steps.ver.outputs.version }}"
-          # ImageBuilder names the combined image something like
-          # openwrt-24.10.0-x86-64-rasputin-generic-ext4-combined-efi.img.gz
-          # and a sysupgrade variant. Pick the combined-efi (flashable)
-          # one + the sysupgrade one.
-          for src in imagebuilder/bin/targets/x86/64/*combined-efi*.img.gz \
-                     imagebuilder/bin/targets/x86/64/*sysupgrade*.img.gz; do
-            [ -f "$src" ] || continue
-            kind=$(basename "$src" | grep -oE 'combined-efi|sysupgrade')
-            cp "$src" "staged/rasputin-fw-n100-${ver}-${kind}.img.gz"
-          done
+          # On x86 OpenWrt there is NO separate `sysupgrade` artifact —
+          # the same combined image is used for initial flash (write to
+          # disk) and for `sysupgrade -F` consumption later. ImageBuilder
+          # produces two rootfs flavors:
+          #   - *-squashfs-combined-efi.img.gz → squashfs base + /overlay
+          #     (atomic-ish upgrades, config preserved across sysupgrade).
+          #     This is the canonical firewall format.
+          #   - *-ext4-combined-efi.img.gz     → writable ext4 root (no
+          #     /overlay split). Easier to mess with at the cost of
+          #     non-atomic upgrade semantics. Not what we want.
+          # Pick squashfs+efi explicitly so the choice doesn't depend on
+          # glob ordering.
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
+          cp "$src" "staged/rasputin-fw-n100-${ver}-combined-efi.img.gz"
           ls -lh staged/
 
       - uses: actions/upload-artifact@v4
