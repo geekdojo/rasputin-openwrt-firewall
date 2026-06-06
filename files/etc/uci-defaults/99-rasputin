@@ -25,17 +25,27 @@ set -eu
 
 logger -t rasputin "99-rasputin: applying first-boot UCI seed"
 
-# --- WAN/LAN port assignment (eth1=WAN, eth0=LAN) ---
-# Verified on the CWWK x86-p5-n100 (Node N reference hardware) on 2026-06-06:
-# the chassis-labeled LAN port enumerates as eth0, WAN as eth1. Both ports
-# are kmod-igc (i226-V). Future Node N revisions that reorder the silicon
-# would need this single block flipped.
+# --- WAN port assignment (eth1=WAN) ---
+#
+# Verified on the CWWK x86-p5-n100 (Node N reference hardware) 2026-06-06:
+# chassis-labeled LAN port enumerates as eth0, WAN as eth1. Both ports
+# are kmod-igc (i226-V). This matches OpenWrt 24.10's stock x86 generic
+# board.d default exactly — ucidef_set_interfaces_lan_wan "eth0" "eth1".
+# We assert the WAN device explicitly anyway (so a future stock change
+# doesn't silently break us) and leave LAN alone.
+#
+# Important: don't mutate network.lan. The stock config binds the LAN
+# interface to the `br-lan` device, with eth0 in that bridge's ports
+# list. An earlier version of this script `uci delete network.lan.device`
+# + `uci add_list network.lan.ports=eth0` — both wrong: the first
+# removed the LAN interface's device binding, the second added a phantom
+# list nobody reads (ports live on the device config, not the interface
+# config). Discovered during the CWWK x86-p5-n100 bring-up 2026-06-07:
+# dev.2 flashed boxes lost LAN DHCP because of this. Fixed in dev.3.
 uci -q batch <<'EOF'
 set network.wan=interface
 set network.wan.device='eth1'
 set network.wan.proto='dhcp'
-delete network.lan.device
-add_list network.lan.ports='eth0'
 commit network
 EOF
 
