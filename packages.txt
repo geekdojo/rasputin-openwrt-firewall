@@ -21,6 +21,31 @@ kmod-igc                 # Intel i226-V driver (Node N's dual 2.5GbE)
 -dnsmasq
 dnsmasq-full
 
+# --- GPU/video kmods we don't need on a firewall ---
+# OpenWrt 24.10's x86 default profile pulls in the entire DRM stack
+# (kmod-drm-i915, kmod-drm, kmod-drm-display-helper, kmod-drm-ttm, ...
+# 11 packages totalling ~3 MB) transitively via kmod-acpi-video. None
+# of it serves any purpose on Node N — efifb (set up by UEFI firmware)
+# provides the framebuffer console fine, and we have no display
+# attached in production anyway. kmod-drm-i915 also tries to fetch
+# non-free GuC firmware that isn't in the OpenWrt feed (on N100 /
+# Alder Lake-N the blob is i915/tgl_guc_70.bin), producing a
+# [drm] *ERROR* cascade on every boot. Dropping the package removes
+# both the wasted RAM and the error noise.
+#
+# IMPORTANT learning from the CWWK x86-p5-n100 bring-up 2026-06-07:
+# putting `i915.enable_guc=0` on the kernel cmdline does NOT silence
+# the GuC error — OpenWrt's busybox kmodloader/modprobe doesn't
+# propagate /proc/cmdline params to loadable modules (verified
+# empirically: /proc/cmdline showed our args, but
+# /sys/module/i915/parameters/enable_guc still read -1 after boot).
+# The only reliable knob for loadable modules in OpenWrt is dropping
+# them at the package level. Hence -kmod-drm-i915 here, and not in
+# patch-image-cmdline.sh (which we keep as belt-and-suspenders for
+# built-in drivers, even though it's a no-op for i915 today).
+-kmod-drm-i915
+-kmod-acpi-video
+
 # --- IDS (tap mode only — N100 does NOT do inline IPS at line rate) ---
 # DEFERRED: Suricata was dropped from the OpenWrt packages feed in 24.10
 # (gone from /releases/24.10.0/packages/x86_64/** AND from snapshots —
