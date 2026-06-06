@@ -225,12 +225,22 @@ jobs:
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
           cp "$src" "staged/rasputin-fw-n100-${ver}-combined-efi.img.gz"
+          # ImageBuilder writes a .manifest file alongside the .img.gz
+          # listing every package + version installed in the image. This
+          # IS our SBOM — authoritative, deterministic, OpenWrt-native.
+          # We stage it under the release-shaped name so the canary
+          # workflow can fetch it from the latest stable to diff against.
+          manifest_src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.manifest 2>/dev/null | head -1)
+          test -n "$manifest_src" || { echo "::error::ImageBuilder manifest not produced"; exit 1; }
+          cp "$manifest_src" "staged/rasputin-fw-n100-${ver}.sbom.txt"
           ls -lh staged/
 
       - uses: actions/upload-artifact@v4
         with:
           name: fw-n100-${{ steps.ver.outputs.version }}
-          path: staged/*.img.gz
+          path: |
+            staged/*.img.gz
+            staged/*.sbom.txt
 
   smoke-fw:
     needs: build
@@ -352,6 +362,11 @@ jobs:
         run: |
           set -eu
           mkdir -p release-out
+          # The SBOM (.sbom.txt = OpenWrt package manifest) ships
+          # alongside the signed images. The canary workflow fetches
+          # this from the most recent stable release to diff against
+          # the current build's manifest.
+          cp artifacts/*.sbom.txt release-out/ 2>/dev/null || true
           : > /tmp/manifest-artifacts.jsonl
           ver="${{ steps.ver.outputs.version }}"
           for img in artifacts/*.img.gz; do
@@ -418,6 +433,31 @@ jobs:
           fi
           gh release create "${{ steps.ver.outputs.version }}" \
             --title "Rasputin Firewall ${{ steps.ver.outputs.version }}" \
-            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Verify each image's signature with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <image>.img.gz.sig -content <image>.img.gz -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`." \
+            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Verify each image's signature with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <image>.img.gz.sig -content <image>.img.gz -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
             $PRERELEASE_FLAG \
             release-out/*
+
+      - name: Lock release as immutable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          # Process discipline: once a tag is published, it MUST NOT be
+          # re-cut. GitHub's immutable-releases feature enforces this at
+          # the API level — no edits to title/body/assets, no deletion.
+          # If we discover a bug post-release, we cut a NEW MICRO tag.
+          # gh release create doesn't expose --immutable yet (as of
+          # 2026), so we PATCH the release via the API right after
+          # creating it.
+          rel_id=$(gh release view "${{ steps.ver.outputs.version }}" --json id --jq .id)
+          if [ -z "$rel_id" ]; then
+            echo "::error::could not resolve release id for ${{ steps.ver.outputs.version }}"
+            exit 1
+          fi
+          # The release-id from gh CLI is the GraphQL node id; the REST
+          # API wants the database id. Fetch via gh api.
+          db_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/${{ steps.ver.outputs.version }}" --jq .id)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$db_id" \
+            -X PATCH \
+            -F immutable=true \
+            --jq '"release \(.tag_name) immutable=\(.immutable)"'

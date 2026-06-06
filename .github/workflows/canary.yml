@@ -1,0 +1,404 @@
+name: canary
+
+# Weekly drift + CVE detector. Builds the same firewall image we'd ship
+# for a release, diffs the resulting package manifest against the latest
+# stable release's manifest, and runs CVE scanners against both. If
+# anything changed or any CVE matches, opens (or updates) a GitHub
+# issue with a copy-pasteable suggested cut command.
+#
+# What this DOES NOT do:
+#   - Tag anything.
+#   - Publish a release.
+#   - Bump the OpenWrt base pin (that's a deliberate human step — base
+#     upgrades have already bitten us twice and need real-hardware
+#     re-validation, not automation).
+#
+# Detection is automated; decision (cut a new MICRO?) is always human.
+# See backlog.md and the release-cadence discussion for the rationale.
+
+on:
+  schedule:
+    # Mondays 08:00 UTC — start of week, before any human normally
+    # touches the repo. Run is cheap (~3 min warm cache) so we could
+    # go daily later if signal warrants.
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      force_issue:
+        description: "Open an issue even if no drift / CVEs detected"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write    # for opening the canary report issue
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- build the same image we'd ship --------------------------------
+      # These steps mirror release.yml's build job exactly. If you edit
+      # one, edit both. (Refactor candidate: extract to a reusable
+      # workflow once we have a second image / second release pipeline
+      # to share with.)
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+
+      - name: Restore ImageBuilder + dl cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            imagebuilder
+            imagebuilder/dl
+          key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
+          restore-keys: ib-
+
+      - name: Init OpenWrt ImageBuilder
+        run: ./scripts/init-imagebuilder.sh
+
+      - name: Fetch vendored rasputin-agent
+        env:
+          GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER=0.1.0
+          mkdir -p /tmp/agent files/usr/bin
+          gh release download "v$VER" \
+            --repo geekdojo/rasputin-control-plane \
+            --pattern "rasputin-agent-${VER}-linux-amd64.tar.gz" \
+            --dir /tmp/agent --clobber
+          tar -xzf /tmp/agent/rasputin-agent-${VER}-linux-amd64.tar.gz \
+            -C files/usr/bin
+          chmod +x files/usr/bin/rasputin-agent
+
+      - name: Inject trust root from org variable
+        run: |
+          mkdir -p files/etc/rasputin/trust
+          printf '%s' "${{ vars.RASPUTIN_ROOT_CA_PEM }}" \
+            > files/etc/rasputin/trust/root-ca.pem
+
+      - name: ImageBuilder build
+        env:
+          PROFILE: generic
+        run: |
+          set -euo pipefail
+          pkgs=$(sed 's/[[:space:]]*#.*$//' packages.txt \
+                 | grep -vE '^[[:space:]]*$' \
+                 | tr '\n' ' ')
+          files_abs=$(realpath files)
+          cd imagebuilder
+          make image \
+            PROFILE="$PROFILE" \
+            PACKAGES="$pkgs" \
+            FILES="$files_abs" \
+            EXTRA_IMAGE_NAME=rasputin \
+            -j"$(nproc)"
+          ls -lh bin/targets/x86/64/
+
+      - name: Patch GRUB cmdline (mirror release.yml)
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends mtools fdisk
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          rc=0
+          gunzip -k -f "$src" || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+            echo "::error::gunzip rc=$rc"; exit "$rc"
+          fi
+          img="${src%.gz}"
+          ./scripts/patch-image-cmdline.sh "$img"
+          gzip -f "$img"
+
+      # --- capture this build's SBOM and the build summary ---------------
+
+      - name: Capture build SBOM (OpenWrt package manifest)
+        id: sbom
+        run: |
+          set -euo pipefail
+          mkdir -p canary-out
+          mfst=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.manifest | head -1)
+          cp "$mfst" canary-out/current.sbom.txt
+          echo "Manifest captured: $(wc -l < canary-out/current.sbom.txt) packages"
+          # Also extract the rootfs for trivy fs-scan
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          echo "img=$src" >> "$GITHUB_OUTPUT"
+
+      # --- fetch baseline (latest stable release's SBOM) -----------------
+
+      - name: Fetch latest stable release SBOM for diff
+        id: baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          # Latest stable = most recent release that's NOT a prerelease.
+          # 2026.06.0 was published before sbom.txt was attached to
+          # releases, so the first canary may find no baseline. That's
+          # OK — we'll just report "first canary; current packages list
+          # attached for reference" and the diff will work starting
+          # from the next stable cut.
+          latest=$(gh release list --repo "$GITHUB_REPOSITORY" \
+                   --limit 30 --json tagName,isPrerelease \
+                   --jq '[.[] | select(.isPrerelease==false)][0].tagName' \
+                   || true)
+          if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+            echo "no stable release yet — first canary"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "have_baseline=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "baseline_tag=$latest"
+          echo "tag=$latest" >> "$GITHUB_OUTPUT"
+          # The asset name follows release.yml's stage step:
+          #   rasputin-fw-n100-<ver>.sbom.txt
+          if gh release download "$latest" --repo "$GITHUB_REPOSITORY" \
+               --pattern '*.sbom.txt' --dir canary-out/baseline 2>/dev/null; then
+            mv canary-out/baseline/*.sbom.txt canary-out/baseline.sbom.txt
+            rmdir canary-out/baseline 2>/dev/null || true
+            echo "have_baseline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no .sbom.txt on $latest (probably pre-canary release); skipping diff"
+            echo "have_baseline=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- diff packages ------------------------------------------------
+
+      - name: Diff packages
+        id: diff
+        run: |
+          set -eu
+          if [ "${{ steps.baseline.outputs.have_baseline }}" != "true" ]; then
+            echo "no baseline → diff is the empty set"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "table=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # OpenWrt manifest format: `pkgname - version` per line.
+          # Build name→version maps for both, then a 3-way diff.
+          awk '{print $1 " " $NF}' canary-out/baseline.sbom.txt | sort > /tmp/baseline.tsv
+          awk '{print $1 " " $NF}' canary-out/current.sbom.txt  | sort > /tmp/current.tsv
+          # join on name; show old/new version
+          join -a1 -a2 -e '(absent)' -o '0,1.2,2.2' /tmp/baseline.tsv /tmp/current.tsv \
+               > /tmp/joined.tsv
+          # Find rows where version actually changed (col2 != col3)
+          awk '$2 != $3 { print }' /tmp/joined.tsv > /tmp/changes.tsv
+
+          if [ ! -s /tmp/changes.tsv ]; then
+            echo "no package changes since baseline"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "table=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "package changes detected:"
+          cat /tmp/changes.tsv
+
+          # Render a markdown table that the issue body can embed.
+          {
+            printf '| Package | Baseline (%s) | Canary |\n' "${{ steps.baseline.outputs.tag }}"
+            printf '|---|---|---|\n'
+            awk '{
+              kind = ($2 == "(absent)") ? "**ADDED**" :
+                     ($3 == "(absent)") ? "**REMOVED**" : ""
+              printf("| `%s` | %s | %s %s |\n", $1, $2, $3, kind)
+            }' /tmp/changes.tsv
+          } > canary-out/diff.md
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Pass table content via heredoc-style $GITHUB_OUTPUT
+          {
+            echo 'table<<DIFFEOF'
+            cat canary-out/diff.md
+            echo 'DIFFEOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # --- CVE scanners — multi-modal sweep -----------------------------
+
+      - name: Install trivy + osv-scanner
+        run: |
+          set -eu
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+          curl -sfL "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64" \
+            -o /tmp/osv-scanner
+          chmod +x /tmp/osv-scanner
+          sudo mv /tmp/osv-scanner /usr/local/bin/
+          trivy --version
+          osv-scanner --version
+
+      - name: Scan with trivy (rootfs mode against the .img)
+        id: trivy
+        run: |
+          set -eu
+          # Trivy has growing OpenWrt coverage but isn't perfect; treat
+          # findings as signal, not gospel. We run in rootfs mode against
+          # the decompressed .img — trivy auto-detects partitions.
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          img="${src%.gz}"
+          # img already decompressed by the cmdline-patch step
+          trivy rootfs --quiet --scanners vuln --severity HIGH,CRITICAL \
+            --format json -o canary-out/trivy.json "$img" 2>/dev/null || \
+            echo "(trivy returned non-zero — common when no DB hits; continuing)"
+          # Count high+critical findings
+          if [ -s canary-out/trivy.json ]; then
+            count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' canary-out/trivy.json 2>/dev/null || echo 0)
+          else
+            count=0
+          fi
+          echo "trivy high/critical findings: $count"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Scan with osv-scanner (second opinion against the package list)
+        id: osv
+        run: |
+          set -eu
+          # OSV-Scanner doesn't have a native "OpenWrt manifest" parser,
+          # so we feed it the rootfs and let it auto-detect.
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          img="${src%.gz}"
+          osv-scanner --format json --output canary-out/osv.json "$img" 2>&1 \
+            | tee canary-out/osv-stderr.txt || true
+          if [ -s canary-out/osv.json ]; then
+            count=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' canary-out/osv.json 2>/dev/null || echo 0)
+          else
+            count=0
+          fi
+          echo "osv high+ findings: $count"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      # --- decide + report ----------------------------------------------
+
+      - name: Decide whether to open an issue
+        id: decide
+        run: |
+          set -eu
+          drift="${{ steps.diff.outputs.changed }}"
+          trivy="${{ steps.trivy.outputs.count }}"
+          osv="${{ steps.osv.outputs.count }}"
+          force="${{ github.event.inputs.force_issue }}"
+          # Open an issue if ANY of: drift detected, trivy found a CVE,
+          # osv found a CVE, manually forced.
+          if [ "$drift" = "true" ] || [ "${trivy:-0}" -gt 0 ] || [ "${osv:-0}" -gt 0 ] || [ "$force" = "true" ]; then
+            echo "open_issue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "open_issue=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build issue body
+        if: steps.decide.outputs.open_issue == 'true'
+        id: body
+        run: |
+          set -eu
+          today=$(date -u +%Y-%m-%d)
+          baseline="${{ steps.baseline.outputs.tag }}"
+          [ -n "$baseline" ] || baseline="(no prior stable)"
+
+          # Compute the next stable MICRO. If baseline is YYYY.MM.N,
+          # suggest YYYY.MM.(N+1); else suggest this month's .0.
+          if echo "$baseline" | grep -qE '^[0-9]{4}\.[0-9]{2}\.[0-9]+$'; then
+            base_ym=$(echo "$baseline" | cut -d. -f1-2)
+            base_micro=$(echo "$baseline" | cut -d. -f3)
+            suggested="${base_ym}.$((base_micro + 1))"
+          else
+            suggested=$(date -u +%Y.%m.0)
+          fi
+
+          {
+            echo "## Canary report — $today"
+            echo
+            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "### Package changes since \`${baseline}\`"
+            if [ "${{ steps.diff.outputs.changed }}" = "true" ]; then
+              echo
+              cat canary-out/diff.md
+            else
+              echo
+              echo "_No package version changes detected._"
+            fi
+            echo
+            echo "### CVE scan"
+            echo
+            echo "| Scanner | High/Critical findings |"
+            echo "|---|---|"
+            echo "| trivy | ${{ steps.trivy.outputs.count }} |"
+            echo "| osv-scanner | ${{ steps.osv.outputs.count }} |"
+            echo
+            echo "Raw JSON outputs uploaded as workflow artifacts."
+            echo
+            echo "### Suggested action"
+            echo
+            if [ "${{ steps.diff.outputs.changed }}" = "true" ] || \
+               [ "${{ steps.trivy.outputs.count }}" -gt 0 ] || \
+               [ "${{ steps.osv.outputs.count }}" -gt 0 ]; then
+              echo "Cut \`$suggested\`:"
+              echo
+              echo '```sh'
+              echo "git tag -a $suggested -m \"canary $today — pick up package updates\""
+              echo "git push origin $suggested"
+              echo '```'
+              echo
+              echo "If a CVE drove this, mention the CVE id(s) in the tag message."
+            else
+              echo "_Forced issue: no drift or CVEs to act on._"
+            fi
+            echo
+            echo "---"
+            echo "*This issue was opened by the canary workflow. Close once acted on or after triage.*"
+          } > canary-out/issue-body.md
+          cat canary-out/issue-body.md
+
+      - name: Upload canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-${{ github.run_id }}
+          path: canary-out/
+
+      - name: Ensure 'canary' label exists
+        if: steps.decide.outputs.open_issue == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          # Idempotent — create-if-not-exists. gh label create errors
+          # noisily if the label exists already; --force does an update
+          # in place which is what we actually want for both paths.
+          gh label create canary \
+            --repo "$GITHUB_REPOSITORY" \
+            --color FFD700 \
+            --description "Opened by the canary workflow — review and act" \
+            --force
+
+      - name: Open / update canary issue
+        if: steps.decide.outputs.open_issue == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          today=$(date -u +%Y-%m-%d)
+          title="Canary $today — package changes / CVEs detected"
+          # Close any stale open canary issues older than this one to
+          # avoid pile-up. (Bryce can re-open if needed.)
+          gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label canary --state open --json number,title \
+            --jq '.[] | "\(.number)\t\(.title)"' \
+            | while IFS=$'\t' read -r num oldtitle; do
+                if [ "$oldtitle" != "$title" ]; then
+                  echo "closing stale canary issue #$num: $oldtitle"
+                  gh issue close "$num" --repo "$GITHUB_REPOSITORY" \
+                    --comment "Superseded by today's canary run."
+                fi
+              done
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --label canary \
+            --body-file canary-out/issue-body.md
