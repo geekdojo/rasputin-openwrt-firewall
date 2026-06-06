@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# apply-seed — read /etc/rasputin/seed.env (if present) and sync it into
+# /etc/config/rasputin (the UCI config the agent reads).
+#
+# Three call sites:
+#   - First-boot uci-defaults/99-rasputin (runs once, may have blank seed).
+#   - Operator workflow: edit /etc/rasputin/seed.env then run this script.
+#   - Controlplane bootstrap_firewall job: pushes the seed, then runs this
+#     remotely via the agent.
+#
+# Idempotent. Blank values are valid — the agent polls and waits when
+# nats_url or join_token is empty.
+
+set -eu
+
+SEED=/etc/rasputin/seed.env
+
+# Defaults — overridden by seed.env if present.
+RASPUTIN_NODE_ROLE=firewall
+RASPUTIN_NATS_URL=
+RASPUTIN_CP_JOIN_TOKEN=
+
+if [ -f "$SEED" ]; then
+	# shellcheck disable=SC1090
+	. "$SEED"
+	logger -t rasputin "apply-seed: loaded seed from $SEED"
+else
+	logger -t rasputin "apply-seed: $SEED not found; writing blank config (agent polls)"
+fi
+
+NODE_ID=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || cat /etc/machine-id)
+
+uci -q batch <<EOF
+delete rasputin.main
+set rasputin.main='rasputin'
+set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
+set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
+set rasputin.main.join_token='${RASPUTIN_CP_JOIN_TOKEN:-}'
+set rasputin.main.node_id='${NODE_ID}'
+commit rasputin
+EOF
+
+# If the agent is running, nudge it to re-read the config.
+if /etc/init.d/rasputin-agent enabled 2>/dev/null; then
+	/etc/init.d/rasputin-agent running 2>/dev/null && /etc/init.d/rasputin-agent reload || true
+fi
+
+logger -t rasputin "apply-seed: complete (seed populated: $([ -f "$SEED" ] && echo yes || echo no))"

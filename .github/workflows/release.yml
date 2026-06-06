@@ -180,6 +180,22 @@ jobs:
             imagebuilder/dl
           key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
 
+      - name: Patch GRUB cmdline (i915.modeset=0)
+        run: |
+          set -euo pipefail
+          # mtools (mcopy/mdir) is the tool we use to read/write FAT EFI
+          # partition contents without losetup/mount. fdisk for finding
+          # the partition offset.
+          sudo apt-get install -y --no-install-recommends mtools fdisk
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
+          # Decompress, patch grub.cfg in place, re-compress (overwriting
+          # the original artifact so the stage step picks it up).
+          gunzip -k -f "$src"
+          img="${src%.gz}"
+          ./scripts/patch-image-cmdline.sh "$img"
+          gzip -f "$img"
+
       - name: Stage release-shaped names + upload artifact
         run: |
           set -euo pipefail

@@ -47,6 +47,15 @@ Known scaffold-stage shortcuts (all flagged for follow-up):
   labeled LAN port enumerates as eth0, WAN as eth1. Encoded in
   `uci-defaults/99-rasputin`; flip there if a future Node N revision
   reorders the silicon.
+- **Kernel cmdline injected post-build.** OpenWrt 24.10 ships `kmod-i915`
+  inside the kernel; the non-free GuC firmware blob isn't included. On
+  N100 silicon (Alder Lake-N, GuC path = `tgl_guc_70.bin`) the driver
+  wedges, the framebuffer console waits ~262 s before falling back to
+  efifb, and dmesg fills with `[drm] *ERROR*` noise. `i915.modeset=0` on
+  the kernel cmdline skips this entirely. Injected by
+  `scripts/patch-image-cmdline.sh` after `make image` — see that script
+  for the rationale and how it patches grub.cfg in the EFI FAT partition.
+  Discovered on the CWWK x86-p5-n100 bring-up 2026-06-07.
 - **No IDS in v1 scaffold.** Suricata — the design's preferred IDS — was
   dropped from the OpenWrt packages feed in 24.10 (verified 2026-05-30:
   gone from `/releases/24.10.0/packages/x86_64/**` and from snapshots).
@@ -75,7 +84,11 @@ files/                                (overlay applied to every image)
 │   └── uci-defaults/99-rasputin      (one-shot first-boot UCI seed)
 └── usr/
     ├── bin/                          (rasputin-agent dropped here by CI)
-    └── lib/rasputin/                 (helpers)
+    └── lib/rasputin/
+        └── apply-seed                (seed.env → /etc/config/rasputin sync;
+                                       called by 99-rasputin and re-callable
+                                       any time the operator/controlplane
+                                       updates /etc/rasputin/seed.env)
 ```
 
 `files/usr/bin/rasputin-agent` is **not committed** — it's authenticated-
@@ -123,9 +136,14 @@ RASPUTIN_NATS_URL=nats://cp-1.rasputin.tailnet:4222
 RASPUTIN_CP_JOIN_TOKEN=...
 ```
 
-The `99-rasputin` uci-defaults script reads this on first boot, writes
-`/etc/config/rasputin`, configures WAN/LAN, enables the agent, and
-self-deletes. See [provisioning.md](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/provisioning.md).
+On first boot, `99-rasputin` (uci-defaults) applies WAN/LAN port
+assignment + nftables flow offload + enables the agent, then calls
+`/usr/lib/rasputin/apply-seed` to sync `seed.env` into
+`/etc/config/rasputin` and self-deletes. If the seed isn't populated
+yet, blank values are written and the agent polls. To re-apply later
+after editing `seed.env` (or to seed via the controlplane's
+`bootstrap_firewall` job remotely), call `/usr/lib/rasputin/apply-seed`
+directly. See [provisioning.md](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/provisioning.md).
 
 ## Cutting a release
 
