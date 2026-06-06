@@ -191,7 +191,16 @@ jobs:
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
           # Decompress, patch grub.cfg in place, re-compress (overwriting
           # the original artifact so the stage step picks it up).
-          gunzip -k -f "$src"
+          # OpenWrt's combined-efi .img.gz has trailing NUL padding, so
+          # gunzip returns rc=2 ("trailing garbage ignored") even though
+          # decompression succeeded. Same gotcha the smoke step works
+          # around — tolerate rc=2 here too.
+          rc=0
+          gunzip -k -f "$src" || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+            echo "::error::gunzip failed with rc=$rc on $src"
+            exit "$rc"
+          fi
           img="${src%.gz}"
           ./scripts/patch-image-cmdline.sh "$img"
           gzip -f "$img"
