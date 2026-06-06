@@ -46,15 +46,17 @@ set rasputin.main.node_id='$(cat /sys/class/dmi/id/board_serial 2>/dev/null || c
 commit rasputin
 EOF
 
-# --- WAN/LAN port assignment (eth0=WAN, eth1=LAN by default) ---
-# Real Node N chassis labeling may differ — flip the device names here if
-# the labeled WAN port is physically eth1. Both ports are kmod-igc (i226-V).
+# --- WAN/LAN port assignment (eth1=WAN, eth0=LAN) ---
+# Verified on the CWWK x86-p5-n100 (Node N reference hardware) on 2026-06-06:
+# the chassis-labeled LAN port enumerates as eth0, the WAN port as eth1.
+# Both ports are kmod-igc (i226-V). If a future Node N revision uses
+# different silicon ordering, flip the device names here.
 uci -q batch <<'EOF'
 set network.wan=interface
-set network.wan.device='eth0'
+set network.wan.device='eth1'
 set network.wan.proto='dhcp'
 delete network.lan.device
-add_list network.lan.ports='eth1'
+add_list network.lan.ports='eth0'
 commit network
 EOF
 

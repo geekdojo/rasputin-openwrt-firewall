@@ -42,9 +42,11 @@ Known scaffold-stage shortcuts (all flagged for follow-up):
   is a custom usign-signed feed exposing `rasputin-agent` as a real
   package (`.apk`/`.ipk`). Overlay is acceptable for v1 scaffold; feed
   comes when we wire OTA updates from the controlplane.
-- **WAN/LAN port assignment defaults to eth0=WAN / eth1=LAN.** Real Node N
-  chassis labeling may differ; `uci-defaults/99-rasputin` is the place to
-  flip if needed.
+- **WAN/LAN port assignment: eth1=WAN, eth0=LAN.** Verified on the CWWK
+  x86-p5-n100 (Node N reference hardware) on 2026-06-06 — the chassis-
+  labeled LAN port enumerates as eth0, WAN as eth1. Encoded in
+  `uci-defaults/99-rasputin`; flip there if a future Node N revision
+  reorders the silicon.
 - **No IDS in v1 scaffold.** Suricata — the design's preferred IDS — was
   dropped from the OpenWrt packages feed in 24.10 (verified 2026-05-30:
   gone from `/releases/24.10.0/packages/x86_64/**` and from snapshots).
