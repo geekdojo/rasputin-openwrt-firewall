@@ -225,12 +225,15 @@ jobs:
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
           cp "$src" "staged/rasputin-fw-n100-${ver}-combined-efi.img.gz"
-          # ImageBuilder writes a .manifest file alongside the .img.gz
+          # ImageBuilder writes a .manifest file in bin/targets/x86/64/
           # listing every package + version installed in the image. This
           # IS our SBOM — authoritative, deterministic, OpenWrt-native.
+          # The manifest is shared across rootfs flavors (squashfs/ext4
+          # don't differ in package set), so the filename is just
+          # `openwrt-<ver>-<arch>-<profile>.manifest` — no flavor suffix.
           # We stage it under the release-shaped name so the canary
           # workflow can fetch it from the latest stable to diff against.
-          manifest_src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.manifest 2>/dev/null | head -1)
+          manifest_src=$(ls imagebuilder/bin/targets/x86/64/*.manifest 2>/dev/null | head -1)
           test -n "$manifest_src" || { echo "::error::ImageBuilder manifest not produced"; exit 1; }
           cp "$manifest_src" "staged/rasputin-fw-n100-${ver}.sbom.txt"
           ls -lh staged/

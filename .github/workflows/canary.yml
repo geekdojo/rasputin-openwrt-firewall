@@ -126,10 +126,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p canary-out
-          mfst=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.manifest | head -1)
+          # ImageBuilder's manifest filename is
+          # openwrt-<ver>-<arch>-<profile>.manifest — shared across
+          # squashfs/ext4 flavors (package set is identical).
+          mfst=$(ls imagebuilder/bin/targets/x86/64/*.manifest 2>/dev/null | head -1)
+          test -n "$mfst" || { echo "::error::ImageBuilder manifest not produced"; exit 1; }
           cp "$mfst" canary-out/current.sbom.txt
           echo "Manifest captured: $(wc -l < canary-out/current.sbom.txt) packages"
-          # Also extract the rootfs for trivy fs-scan
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           echo "img=$src" >> "$GITHUB_OUTPUT"
 
