@@ -31,8 +31,19 @@ fi
 
 NODE_ID=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || cat /etc/machine-id)
 
+# Ensure /etc/config/rasputin exists. UCI's `commit` writes to an
+# existing file but does NOT create one from scratch on first call —
+# discovered during the CWWK bring-up 2026-06-07 when apply-seed
+# silently failed to create the file. Touch is idempotent.
+touch /etc/config/rasputin
+
+# Originally this batch started with `delete rasputin.main` (defensive
+# cleanup of a stale write). That delete fails when the section doesn't
+# exist yet, and UCI's batch aborts silently on the failed delete —
+# the downstream `set` + `commit` never run. Just `set` directly; UCI
+# set semantics are "create or overwrite", so re-running apply-seed
+# stays idempotent.
 uci -q batch <<EOF
-delete rasputin.main
 set rasputin.main='rasputin'
 set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
 set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
