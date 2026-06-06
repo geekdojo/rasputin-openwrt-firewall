@@ -9,15 +9,25 @@
 # versions, so we patch the generated image directly.
 #
 # What we inject:
-#   i915.modeset=0   — Skips Intel i915 GuC firmware load on N100. The
-#                      OpenWrt 24.10 x86 image ships kmod-i915 built into
-#                      the kernel but doesn't include the GuC firmware
-#                      blob (non-free). Without modeset=0 the driver
-#                      wedges, framebuffer console waits ~262 s before
-#                      falling back to efifb, and dmesg fills with
-#                      [drm] *ERROR* noise. Verified cosmetic but
-#                      annoying — discovered on CWWK x86-p5-n100
-#                      bring-up 2026-06-07.
+#   i915.modeset=0 i915.enable_guc=0
+#
+#   The OpenWrt 24.10 x86 kernel has i915 built in (not a kmod we can
+#   blacklist), and the non-free Intel GuC firmware blob isn't bundled.
+#   On N100 / Alder Lake-N the driver wedges trying to fetch
+#   i915/tgl_guc_70.bin, framebuffer console waits ~262 s before falling
+#   back to efifb, and dmesg fills with [drm] *ERROR* noise.
+#
+#   For a *built-in* driver, modprobe.blacklist= doesn't apply (the
+#   driver is part of the kernel image, not loaded via modprobe). The
+#   only lever is per-driver kernel cmdline params:
+#     - i915.modeset=0   → skip KMS (driver still binds + tries GuC)
+#     - i915.enable_guc=0 → skip GuC firmware load entirely (the bit
+#                           actually failing on Alder Lake-N without
+#                           the firmware blob)
+#   We set both for belt-and-suspenders. enable_guc=0 is the targeted
+#   fix; modeset=0 keeps us cleanly on efifb. Discovered + diagnosed
+#   on CWWK x86-p5-n100 bring-up 2026-06-07 (dev.2 shipped with only
+#   modeset=0 and still showed the GuC error).
 #
 # Usage:
 #   ./scripts/patch-image-cmdline.sh <path/to/openwrt-*-combined-efi.img>
@@ -39,7 +49,7 @@ fi
 
 # Extra args we want to append. Single source of truth — bump here, not
 # in the workflow.
-EXTRA_CMDLINE="i915.modeset=0"
+EXTRA_CMDLINE="i915.modeset=0 i915.enable_guc=0"
 
 echo "patch-image-cmdline: target image $IMG"
 echo "patch-image-cmdline: cmdline to inject: $EXTRA_CMDLINE"
@@ -82,9 +92,11 @@ echo "----- grub.cfg contents before patch -----"
 cat "$GRUBCFG"
 
 # --- Idempotent injection: only add if not already there ---
-if grep -q "$EXTRA_CMDLINE" "$GRUBCFG"; then
+# Sentinel is enable_guc — the *targeted* fix. modeset=0 alone (which
+# dev.2/3 shipped with) is detected as stale and re-patched cleanly.
+if grep -q 'i915.enable_guc=0' "$GRUBCFG"; then
 	echo
-	echo "patch-image-cmdline: cmdline already contains '$EXTRA_CMDLINE'; nothing to do"
+	echo "patch-image-cmdline: cmdline already contains the full fix; nothing to do"
 	exit 0
 fi
 
