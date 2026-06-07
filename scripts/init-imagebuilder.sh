@@ -35,9 +35,25 @@ SUMS_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TA
 
 cd "$(dirname "$0")/.."
 
+# Belt-and-suspenders cache hygiene: the CI workflow's `restore-keys: ib-`
+# falls back to ANY cache with the `ib-` prefix when the exact key
+# (hash of this script + packages.txt) doesn't match. That's intentional
+# for partial reuse of the dl/ subdir's package downloads, but it also
+# pulls in any leftover imagebuilder/ from a prior OPENWRT_VERSION.
+# Without this check, bumping OPENWRT_VERSION builds against the stale
+# cached imagebuilder — silently, because the dir exists so we skip
+# re-download. Discovered on the 24.10.0 → 25.12.4 bump 2026-06-07
+# (2026.07.0-dev.1 shipped as 24.10.0 despite claiming 25.12.4).
 if [ -d imagebuilder ]; then
-	echo "imagebuilder/ already present (delete to re-init)"
-	exit 0
+	stamped=""
+	[ -f imagebuilder/.rasputin_openwrt_version ] && \
+		stamped=$(cat imagebuilder/.rasputin_openwrt_version)
+	if [ "$stamped" = "$OPENWRT_VERSION" ]; then
+		echo "imagebuilder/ already at $OPENWRT_VERSION (stamp matches)"
+		exit 0
+	fi
+	echo "imagebuilder/ stamp mismatch (have='$stamped' want='$OPENWRT_VERSION'); re-initializing"
+	rm -rf imagebuilder
 fi
 
 mkdir -p .imagebuilder-dl
@@ -78,6 +94,7 @@ if ! command -v zstd >/dev/null 2>&1; then
 fi
 tar --zstd -xf ".imagebuilder-dl/$IB_TARBALL"
 mv "openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET_DIR}.Linux-x86_64" imagebuilder
+echo "$OPENWRT_VERSION" > imagebuilder/.rasputin_openwrt_version
 rm -rf .imagebuilder-dl
 
 echo "ImageBuilder ready at $(pwd)/imagebuilder (OpenWrt ${OPENWRT_VERSION}, target ${TARGET})"
