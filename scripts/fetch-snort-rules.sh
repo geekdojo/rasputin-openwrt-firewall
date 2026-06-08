@@ -58,19 +58,20 @@ rm -rf "$RULES_DIR"
 mkdir -p "$RULES_DIR"
 rm -f "$STAGE_DIR/classification.config" "$STAGE_DIR/sid-msg.map"
 
-# Extract just the files we use; ET Open's tarball is `rules/` prefixed.
-#   - rules/*.rules           → /etc/snort/rules/        (auto-included by snort.uc)
-#   - rules/classification.config → /etc/snort/           (referenced by rules' classtype:)
-#   - rules/sid-msg.map           → /etc/snort/           (sig-id → message lookup)
-# License files (BSD-License.txt, gpl-2.0.txt, LICENSE) are extracted too
-# so the operator can audit them on the device.
-tar -xzf "$TMP_TAR" -C "$STAGE_DIR" --strip-components=1 \
-	'rules/*.rules' \
-	'rules/classification.config' \
-	'rules/sid-msg.map' \
-	'rules/BSD-License.txt' \
-	'rules/LICENSE' \
-	'rules/gpl-2.0.txt'
+# Extract the whole `rules/` directory from the tarball. ET Open's tarball
+# is `rules/`-prefixed and contains: *.rules + classification.config +
+# sid-msg.map + a few license files + compromised-ips.txt + a couple of
+# small text files. snort.uc auto-includes any *.rules in /etc/snort/rules/;
+# the other files sit next to them in /etc/snort/ for classification refs,
+# sid lookups, and operator-visible licensing. Total ~55 MB uncompressed,
+# compresses to a few MB in squashfs.
+#
+# We unpack everything rather than using a glob like 'rules/*.rules' because
+# tar glob handling is GNU-vs-BSD divergent (GNU needs --wildcards, BSD
+# enables it by default; mixing breaks one or the other) and the few extra
+# small files don't justify the portability footgun. Caught in CI run
+# 27168062216 when --no-flag globs failed on Ubuntu's GNU tar.
+tar -xzf "$TMP_TAR" -C "$STAGE_DIR" --strip-components=1 rules/
 
 # tar with --strip-components=1 drops 'rules/' from the path, putting
 # emerging-*.rules at $STAGE_DIR/. Move them into rules/.
