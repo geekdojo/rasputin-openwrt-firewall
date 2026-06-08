@@ -44,17 +44,27 @@ cd "$(dirname "$0")/.."
 # cached imagebuilder — silently, because the dir exists so we skip
 # re-download. Discovered on the 24.10.0 → 25.12.4 bump 2026-06-07
 # (2026.07.0-dev.1 shipped as 24.10.0 despite claiming 25.12.4).
+STAMP_MATCH=false
 if [ -d imagebuilder ]; then
 	stamped=""
 	[ -f imagebuilder/.rasputin_openwrt_version ] && \
 		stamped=$(cat imagebuilder/.rasputin_openwrt_version)
 	if [ "$stamped" = "$OPENWRT_VERSION" ]; then
-		echo "imagebuilder/ already at $OPENWRT_VERSION (stamp matches)"
-		exit 0
+		echo "imagebuilder/ already at $OPENWRT_VERSION (stamp matches); skipping download"
+		STAMP_MATCH=true
+	else
+		echo "imagebuilder/ stamp mismatch (have='$stamped' want='$OPENWRT_VERSION'); re-initializing"
+		rm -rf imagebuilder
 	fi
-	echo "imagebuilder/ stamp mismatch (have='$stamped' want='$OPENWRT_VERSION'); re-initializing"
-	rm -rf imagebuilder
 fi
+
+if [ "$STAMP_MATCH" = "true" ]; then
+	# Cache-hit path. Skip straight to the partition-size adjustment at
+	# the end — that's idempotent and survives a cache restore that
+	# pulled an older .config back in (e.g. one built before we started
+	# bumping the partsize, or with a different value).
+	:
+else
 
 mkdir -p .imagebuilder-dl
 cd .imagebuilder-dl
@@ -96,5 +106,30 @@ tar --zstd -xf ".imagebuilder-dl/$IB_TARBALL"
 mv "openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET_DIR}.Linux-x86_64" imagebuilder
 echo "$OPENWRT_VERSION" > imagebuilder/.rasputin_openwrt_version
 rm -rf .imagebuilder-dl
+
+fi  # end STAMP_MATCH == false (cold path)
+
+# Bump CONFIG_TARGET_ROOTFS_PARTSIZE. The OpenWrt 25.12 x86/generic
+# ImageBuilder defaults to 104 MB, which was generous when the image
+# was just OpenWrt-base + rasputin-agent (~50 MB) but is too tight once
+# we add snort3 + libdaq + hyperscan + ET Open rules (~80 MB combined).
+# 512 MB is room to grow: comfortable headroom for the ruleset growing
+# with image updates, plus any additional defensive packages design
+# partners ask for. The squashfs build compresses to ~30-40 MB regardless;
+# this is the ext4 partition image size on disk.
+#
+# Caught: CI run 27168495058 — "ext4_allocate_best_fit_partial: failed
+# to allocate 432 blocks, out of space?" — when ET Open landed.
+#
+# Idempotent + runs on BOTH stamp-match cache-hits and cold extractions
+# so a stale cache that holds an older .config gets corrected.
+TARGET_PARTSIZE=512
+sed -i.bak -E "s/^(CONFIG_TARGET_ROOTFS_PARTSIZE=).*/\1${TARGET_PARTSIZE}/" imagebuilder/.config && rm -f imagebuilder/.config.bak
+grep -q "^CONFIG_TARGET_ROOTFS_PARTSIZE=${TARGET_PARTSIZE}$" imagebuilder/.config || {
+	echo "ERROR: failed to set CONFIG_TARGET_ROOTFS_PARTSIZE=${TARGET_PARTSIZE} in imagebuilder/.config" >&2
+	grep "ROOTFS_PARTSIZE" imagebuilder/.config >&2 || true
+	exit 1
+}
+echo "  rootfs partition size set to ${TARGET_PARTSIZE} MB"
 
 echo "ImageBuilder ready at $(pwd)/imagebuilder (OpenWrt ${OPENWRT_VERSION}, target ${TARGET})"
