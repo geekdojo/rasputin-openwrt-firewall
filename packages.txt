@@ -46,20 +46,17 @@ dnsmasq-full
 -kmod-drm-i915
 -kmod-acpi-video
 
-# --- IDS (tap mode only — N100 does NOT do inline IPS at line rate) ---
-# DEFERRED: Suricata was dropped from the OpenWrt packages feed in 24.10
-# (gone from /releases/24.10.0/packages/x86_64/** AND from snapshots —
-# verified 2026-05-30). Snort3 is the only inline-IDS package in the
-# 24.10 feed. The original design (firewall-integration.md) called for
-# Suricata in tap mode; that's now an open design choice:
-#   (a) ship Snort3 instead (similar feature set, different rule format)
-#   (b) build Suricata as a custom .apk from the OpenWrt SDK
-#   (c) skip inline IDS in v1; revisit when controlplane app catalog
-#       can deliver a Suricata container alongside the firewall
-# Tracked in: ~/src/geekdojo-wiki/projects/rasputin/backlog.md (firewall).
-# v1 scaffold ships WITHOUT IDS so CI is green — operator can install
-# snort3 manually until the design call is locked.
-# snort3
+# --- IDS (tap mode via UCI method=pcap, action=alert) ---
+# Locked 2026-06-08: ship snort3 from the OpenWrt 25.12 feed (option (a)
+# of the original three-way choice). The Suricata-removed-from-feeds
+# blocker that drove the v0 deferral was 24.10-specific; 25.12 has
+# snort3-3.10.0.0-r1 and ET Open ships snort3-native rules. Tap mode
+# (DAQ=pcap on the WAN interface) is a first-class UCI option in
+# /etc/config/snort — no kernel NFQUEUE, no fast-path disruption.
+# `action=alert` is the safety belt: even if a rule says "drop", snort
+# only logs. The N100 still cannot do inline IPS at line rate, and we
+# remain honest about that in firewall-image.md §2.
+snort3
 
 # --- rasputin-agent ---
 # NOT listed here. v1 scaffold delivers the binary via files/usr/bin/

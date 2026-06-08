@@ -21,6 +21,18 @@
 # holds per-fleet secrets once filled).
 /files/etc/rasputin/seed.env
 
+# ET Open snort3 ruleset — fetched at build time by
+# scripts/fetch-snort-rules.sh (SHA pinned in that script for
+# reproducibility). 47 .rules files + classification.config + sid-msg.map
+# totalling ~55 MB; compresses to a few MB in squashfs. Never committed.
+/files/etc/snort/rules/
+/files/etc/snort/classification.config
+/files/etc/snort/sid-msg.map
+/files/etc/snort/.et-open-stamp
+/files/etc/snort/BSD-License.txt
+/files/etc/snort/LICENSE
+/files/etc/snort/gpl-2.0.txt
+
 # OS noise
 .DS_Store
 

@@ -50,6 +50,7 @@ jobs:
         run: |
           set -e
           req="README.md packages.txt scripts/init-imagebuilder.sh
+               scripts/fetch-snort-rules.sh
                files/etc/init.d/rasputin-agent
                files/etc/uci-defaults/99-rasputin
                files/etc/rasputin/seed.env.template
@@ -141,6 +142,13 @@ jobs:
           if [ ! -s files/etc/rasputin/trust/root-ca.pem ]; then
             echo "::warning::RASPUTIN_ROOT_CA_PEM org variable is empty — image will ship without a verifiable trust root"
           fi
+
+      # Bake the pinned ET Open snort3 ruleset into files/etc/snort/.
+      # ImageBuilder consumes files/ verbatim — the rules must be on disk
+      # BEFORE `make image` runs. The script is idempotent and pins the
+      # tarball SHA; bump PINNED_SHA in the script when refreshing rules.
+      - name: Fetch ET Open snort3 rules
+        run: ./scripts/fetch-snort-rules.sh
 
       - name: ImageBuilder build
         env:

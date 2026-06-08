@@ -56,13 +56,15 @@ Known scaffold-stage shortcuts (all flagged for follow-up):
   `scripts/patch-image-cmdline.sh` after `make image` — see that script
   for the rationale and how it patches grub.cfg in the EFI FAT partition.
   Discovered on the CWWK x86-p5-n100 bring-up 2026-06-07.
-- **No IDS in v1 scaffold.** Suricata — the design's preferred IDS — was
-  dropped from the OpenWrt packages feed in 24.10 (verified 2026-05-30:
-  gone from `/releases/24.10.0/packages/x86_64/**` and from snapshots).
-  Open call between (a) ship Snort3 (the only inline-IDS package
-  remaining in 24.10), (b) build Suricata via the OpenWrt SDK, or
-  (c) defer to a controlplane-delivered IDS container. Tracked in
-  `backlog.md` under firewall.
+- **IDS: snort3 in tap mode + ET Open community ruleset (locked 2026-06-08).**
+  OpenWrt 25.12.4 ships `snort3-3.10.0.0-r1` in the packages feed; tap
+  mode (`method=pcap`, `action=alert`) is a first-class UCI option, so
+  the kernel's forwarding fast path (flow_offloading) is undisturbed.
+  ET Open snort3 rules are baked into `files/etc/snort/` at build time
+  by `scripts/fetch-snort-rules.sh` (SHA-pinned; bump in-script when
+  refreshing). Rule updates ride image releases — independent
+  controlplane rule pushes are a backlog item. Honest about the limit:
+  the N100 doesn't do inline IPS at line rate, hence detection-only.
 - **No A/B sysupgrade.** Bad image = re-flash via USB. Documented v1
   limitation ([firewall-image.md §5](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/firewall-image.md)).
 
@@ -73,6 +75,8 @@ README.md
 .gitignore
 .github/workflows/release.yml         (validate → build → smoke → sign → release)
 scripts/init-imagebuilder.sh          (download + verify pinned OpenWrt ImageBuilder)
+scripts/fetch-snort-rules.sh          (SHA-pinned ET Open snort3 rule fetch,
+                                       run before `make image`)
 packages.txt                          (the list passed to `make image PACKAGES=...`)
 files/                                (overlay applied to every image)
 ├── etc/
@@ -80,6 +84,8 @@ files/                                (overlay applied to every image)
 │   │   ├── seed.env.template         (firewall provisioning seed)
 │   │   ├── trust/                    (root-ca.pem injected by CI from org var)
 │   │   └── README.md
+│   ├── snort/                        (ET Open ruleset dropped here by CI;
+│   │                                  not committed)
 │   ├── init.d/rasputin-agent         (procd service)
 │   └── uci-defaults/99-rasputin      (one-shot first-boot UCI seed)
 └── usr/

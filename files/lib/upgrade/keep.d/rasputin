@@ -18,3 +18,22 @@
 #
 # Discovered during the CWWK x86-p5-n100 sysupgrade test 2026-06-07.
 /etc/rasputin/
+
+# Snort3 (IDS):
+#   - /etc/config/snort        operator UCI tuning (changing home_net,
+#                              flipping action, suppressing categories
+#                              via include path, etc.) MUST survive
+#                              sysupgrade. 99-rasputin only seeds initial
+#                              values once on first boot via uci-defaults
+#                              and then self-deletes, so the operator's
+#                              tuning persists across reflashes only via
+#                              this preservation.
+#   - /etc/snort/rules/local.rules    operator's own custom rules,
+#                              auto-picked-up by snort.uc's template
+#                              loop. Bundled emerging-*.rules are NOT
+#                              preserved — they refresh from the new
+#                              image, which is the rule-update mechanism
+#                              for v1 (independent rule pushes are a
+#                              backlog item).
+/etc/config/snort
+/etc/snort/rules/local.rules

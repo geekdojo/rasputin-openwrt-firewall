@@ -87,6 +87,9 @@ jobs:
           printf '%s' "${{ vars.RASPUTIN_ROOT_CA_PEM }}" \
             > files/etc/rasputin/trust/root-ca.pem
 
+      - name: Fetch ET Open snort3 rules
+        run: ./scripts/fetch-snort-rules.sh
+
       - name: ImageBuilder build
         env:
           PROFILE: generic

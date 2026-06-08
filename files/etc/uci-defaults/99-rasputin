@@ -59,8 +59,40 @@ EOF
 # --- Apply seed (writes /etc/config/rasputin; blank values are OK) ---
 /usr/lib/rasputin/apply-seed || logger -t rasputin "99-rasputin: apply-seed returned non-zero (continuing)"
 
+# --- Snort3 IDS in tap mode (decision locked 2026-06-08) ---
+#
+# The OpenWrt snort3 package supports tap-mode capture as a first-class
+# UCI option (method=pcap reads packets via libpcap in promiscuous mode
+# on the named interface — the kernel's forwarding path and our
+# flow_offloading fast path are completely undisturbed). action=alert is
+# the belt-and-suspenders safety: even if an ET Open rule body says
+# "drop" or "block", snort only logs. v1 is detection-only by design;
+# the N100 doesn't do inline IPS at line rate (firewall-image.md §2).
+#
+# We diverge from the package defaults in five places:
+#   enabled  0 → 1     turn the service on
+#   manual   1 → 0     use UCI-driven config generation (snort-mgr setup),
+#                      not the legacy 'snort -c /etc/snort/snort.lua' path
+#   interface eth0 → eth1   our WAN is eth1 on the CWWK (and the locked
+#                      Node N port assignment; see WAN block above)
+#   action   default → alert    detection-only safety belt
+#   log_dir  /var/log → /var/log/snort    keep snort's noise isolated;
+#                      the agent tails alerts from this known location
+# All other options stay at the package defaults (mode=ids, method=pcap,
+# external_net=any, home_net=192.168.1.0/24 matching OpenWrt's LAN
+# default, snaplen=1518, logging=1, openappid=0).
+uci -q batch <<'EOF'
+set snort.snort.enabled='1'
+set snort.snort.manual='0'
+set snort.snort.interface='eth1'
+set snort.snort.action='alert'
+set snort.snort.log_dir='/var/log/snort'
+commit snort
+EOF
+
 # --- Enable services (do not start yet — uci-defaults runs pre-procd) ---
 /etc/init.d/rasputin-agent enable
+/etc/init.d/snort enable
 
 logger -t rasputin "99-rasputin: provisioning complete"
 exit 0
