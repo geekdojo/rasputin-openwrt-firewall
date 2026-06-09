@@ -71,7 +71,9 @@ jobs:
           GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          VER=0.1.0
+          # Keep in sync with release.yml. v0.2.0 adds the IDS subsystem
+          # (see release.yml comment).
+          VER=0.2.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \

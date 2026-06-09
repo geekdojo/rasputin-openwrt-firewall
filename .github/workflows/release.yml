@@ -124,7 +124,12 @@ jobs:
           set -euo pipefail
           # Pinned agent version. Bump when the controlplane cuts a new
           # release; in the longer term this becomes a per-release input.
-          VER=0.1.0
+          # v0.2.0 (2026-06-08): adds the IDS subsystem (snort3 alert_fast
+          # tailer + NATS publish on firewall-role agents). Required for
+          # the IDS pipeline to fire end-to-end on the firewall image —
+          # v0.1.0 didn't have it and was the silent-IDS bug on the CWWK
+          # bring-up.
+          VER=0.2.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
