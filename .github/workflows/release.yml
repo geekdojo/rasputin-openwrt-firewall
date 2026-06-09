@@ -153,7 +153,7 @@ jobs:
       # ImageBuilder consumes files/ verbatim — the rules must be on disk
       # BEFORE `make image` runs. The script is idempotent and pins the
       # tarball SHA; bump PINNED_SHA in the script when refreshing rules.
-      - name: Fetch ET Open snort3 rules
+      - name: Fetch Snort3 Community Rules
         run: ./scripts/fetch-snort-rules.sh
 
       - name: ImageBuilder build
