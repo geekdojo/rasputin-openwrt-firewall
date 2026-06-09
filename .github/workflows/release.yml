@@ -129,7 +129,12 @@ jobs:
           # the IDS pipeline to fire end-to-end on the firewall image —
           # v0.1.0 didn't have it and was the silent-IDS bug on the CWWK
           # bring-up.
-          VER=0.2.0
+          # v0.2.1 (2026-06-09): adds the "ids: tailer started, path=...,
+          # subject=..." startup log line so operators bisecting "is the
+          # IDS subsystem alive?" can grep for it instead of resorting to
+          # the manual `echo >> alert_fast.txt` bisect trick we needed on
+          # the dev.1 → dev.2 bring-up.
+          VER=0.2.1
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
