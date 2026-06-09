@@ -65,11 +65,11 @@ EOF
 # UCI option (method=pcap reads packets via libpcap in promiscuous mode
 # on the named interface — the kernel's forwarding path and our
 # flow_offloading fast path are completely undisturbed). action=alert is
-# the belt-and-suspenders safety: even if an ET Open rule body says
-# "drop" or "block", snort only logs. v1 is detection-only by design;
-# the N100 doesn't do inline IPS at line rate (firewall-image.md §2).
+# the belt-and-suspenders safety: even if a rule body says "drop" or
+# "block", snort only logs. v1 is detection-only by design; the N100
+# doesn't do inline IPS at line rate (firewall-image.md §2).
 #
-# We diverge from the package defaults in five places:
+# We diverge from the package defaults in seven places:
 #   enabled  0 → 1     turn the service on
 #   manual   1 → 0     use UCI-driven config generation (snort-mgr setup),
 #                      not the legacy 'snort -c /etc/snort/snort.lua' path
@@ -78,15 +78,32 @@ EOF
 #   action   default → alert    detection-only safety belt
 #   log_dir  /var/log → /var/log/snort    keep snort's noise isolated;
 #                      the agent tails alerts from this known location
+#   home_net 192.168.1.0/24 → any    we tap eth1 (WAN), where everything
+#                      snort sees is post-NAT — source IPs are the
+#                      firewall's WAN IP, not the LAN client. Default
+#                      HOME_NET would only match traffic destined to
+#                      LAN, missing scans/exploits hitting the WAN side.
+#                      `any` widens HOME_NET so direction-aware rules
+#                      fire for any traffic on the wire. Caught on the
+#                      CWWK bring-up 2026-06-08.
+#   include  '' → /etc/snort/rasputin-extra.lua    appended at end of
+#                      snort-mgr's generated config; that file enables
+#                      the alert_fast output module (snort.uc template
+#                      ships it commented out) so the agent's IDS
+#                      tailer has a file to read, and disables
+#                      output.show_year (the YY/MM/DD format breaks
+#                      the agent's MM/DD parser).
+#
 # All other options stay at the package defaults (mode=ids, method=pcap,
-# external_net=any, home_net=192.168.1.0/24 matching OpenWrt's LAN
-# default, snaplen=1518, logging=1, openappid=0).
+# external_net=any, snaplen=1518, logging=1, openappid=0).
 uci -q batch <<'EOF'
 set snort.snort.enabled='1'
 set snort.snort.manual='0'
 set snort.snort.interface='eth1'
 set snort.snort.action='alert'
 set snort.snort.log_dir='/var/log/snort'
+set snort.snort.home_net='any'
+set snort.snort.include='/etc/snort/rasputin-extra.lua'
 commit snort
 EOF
 

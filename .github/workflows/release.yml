@@ -53,6 +53,7 @@ jobs:
                scripts/fetch-snort-rules.sh
                files/etc/init.d/rasputin-agent
                files/etc/uci-defaults/99-rasputin
+               files/etc/snort/rasputin-extra.lua
                files/etc/rasputin/seed.env.template
                files/etc/rasputin/trust/README.md"
           for f in $req; do

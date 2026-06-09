@@ -21,13 +21,19 @@
 # holds per-fleet secrets once filled).
 /files/etc/rasputin/seed.env
 
-# ET Open snort3 ruleset — fetched at build time by
+# Snort3 Community ruleset — fetched at build time by
 # scripts/fetch-snort-rules.sh (SHA pinned in that script for
-# reproducibility). ~47 .rules files + classification.config +
-# sid-msg.map + license/info files + compromised-ips.txt, totalling
-# ~55 MB; compresses to a few MB in squashfs. Whole directory is
-# build-fetched — nothing under here is ever committed.
-/files/etc/snort/
+# reproducibility). 1 .rules file (~4k rules) + sid-msg.map + licenses,
+# ~1 MB compressed. Whole directory's contents are build-fetched and
+# ignored EXCEPT rasputin-extra.lua — our lua override is committed; it
+# gets included at the end of the snort-mgr-generated config by the
+# 99-rasputin UCI `snort.snort.include` setting.
+#
+# Note: must ignore /files/etc/snort/* (not the dir itself) so the
+# !rasputin-extra.lua re-include works; gitignore can't re-include a
+# file inside an explicitly-ignored directory.
+/files/etc/snort/*
+!/files/etc/snort/rasputin-extra.lua
 
 # OS noise
 .DS_Store

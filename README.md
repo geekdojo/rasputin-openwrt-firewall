@@ -56,15 +56,20 @@ Known scaffold-stage shortcuts (all flagged for follow-up):
   `scripts/patch-image-cmdline.sh` after `make image` — see that script
   for the rationale and how it patches grub.cfg in the EFI FAT partition.
   Discovered on the CWWK x86-p5-n100 bring-up 2026-06-07.
-- **IDS: snort3 in tap mode + ET Open community ruleset (locked 2026-06-08).**
+- **IDS: snort3 in tap mode + Snort3 Community ruleset (locked 2026-06-08).**
   OpenWrt 25.12.4 ships `snort3-3.10.0.0-r1` in the packages feed; tap
   mode (`method=pcap`, `action=alert`) is a first-class UCI option, so
   the kernel's forwarding fast path (flow_offloading) is undisturbed.
-  ET Open snort3 rules are baked into `files/etc/snort/` at build time
-  by `scripts/fetch-snort-rules.sh` (SHA-pinned; bump in-script when
-  refreshing). Rule updates ride image releases — independent
-  controlplane rule pushes are a backlog item. Honest about the limit:
-  the N100 doesn't do inline IPS at line rate, hence detection-only.
+  Snort3 Community Rules (Cisco Talos-maintained, free, snort3-native)
+  are baked into `files/etc/snort/` at build time by
+  `scripts/fetch-snort-rules.sh` (SHA-pinned; bump in-script when
+  refreshing). The first cut bundled ET Open `/open/snort-3.0.0/`, but
+  those rules turned out to still use snort2-era keyword placement that
+  snort 3.10.0.0 rejects (212k parse errors on the CWWK bring-up
+  2026-06-08); swapped to the snort.org community feed which parses
+  cleanly. Rule updates ride image releases — independent controlplane
+  rule pushes are a backlog item. Honest about the limit: the N100
+  doesn't do inline IPS at line rate, hence detection-only.
 - **No A/B sysupgrade.** Bad image = re-flash via USB. Documented v1
   limitation ([firewall-image.md §5](https://github.com/geekdojo/geekdojo-wiki/blob/main/projects/rasputin/design/os-images/firewall-image.md)).
 
