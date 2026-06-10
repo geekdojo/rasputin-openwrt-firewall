@@ -36,6 +36,13 @@ start_service() {
 	[ -n "$node_id" ] && procd_append_param env RASPUTIN_NODE_ID="$node_id"
 	# Trust root for verifying signed update images before sysupgrade.
 	procd_append_param env RASPUTIN_TRUST_ROOT=/etc/rasputin/trust/root-ca.pem
+	# Agent state (updater bookkeeping, mock-backend state). Without this
+	# the agent would mkdir ./agent-state relative to procd's cwd=/ — it
+	# happens to work on the overlay but lands in an unowned root-level
+	# dir and is lost on sysupgrade. /etc/rasputin/ is on the overlay AND
+	# in the sysupgrade keep-list (files/lib/upgrade/keep.d/rasputin), so
+	# update state survives the upgrade reboot it is meant to track.
+	procd_append_param env RASPUTIN_AGENT_STATE_DIR=/etc/rasputin/agent-state
 
 	procd_set_param respawn 3600 5 10   # threshold/timeout/retry (procd defaults shape)
 	procd_set_param stdout 1
