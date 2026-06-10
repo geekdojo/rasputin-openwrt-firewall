@@ -125,12 +125,22 @@ scp "${SCP_OPTS[@]}" "$IMG_PATH" "$SSH_TARGET:/tmp/fw.img.gz"
 
 # --- Step 3: run sysupgrade ---
 
-# The SSH session drops on "Closing all shell sessions" and the final
-# ubus error is a normal side-effect of procd dying mid-flash. Suppress
-# the non-zero exit by piping through `cat` (which always exits 0).
+# The SSH session drops on "Closing all shell sessions" — the final
+# ubus error is a normal side-effect of procd dying mid-flash. Swallow
+# the non-zero exit with `|| true` so set -e doesn't kill the script
+# before we get to the wait + restore steps.
+#
+# (Earlier versions used `... | cat` thinking that would swallow the
+# exit, but with `set -o pipefail` enabled at the top, the pipeline
+# still returned the ssh's non-zero code → set -e killed the script
+# right after dispatching sysupgrade. Caught on the dev.6 flash
+# 2026-06-09 — the firewall came back fine via keep.d, but the
+# script's restore step never ran. Documented here as the canonical
+# "don't reach for `| cat` on a failure-expected command under
+# pipefail" reminder.)
 log "running sysupgrade -F on firewall (SSH session will drop — that's normal)"
 ssh "${SSH_OPTS[@]}" -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
-	"$SSH_TARGET" 'sysupgrade -F /tmp/fw.img.gz 2>&1' | cat
+	"$SSH_TARGET" 'sysupgrade -F /tmp/fw.img.gz 2>&1' || true
 log "sysupgrade dispatched; firewall is rebooting"
 
 # --- Step 4: wait for re-up ---
