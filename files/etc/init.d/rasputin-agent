@@ -22,8 +22,15 @@ start_service() {
 
 	# If the operator hasn't filled the seed yet, log + back off — procd
 	# will respawn on the configured cadence. Avoid a tight crash loop.
-	if [ -z "$nats_url" ] || [ -z "$join_token" ]; then
-		logger -t rasputin-agent "seed not configured (nats_url or join_token blank); sleeping 60s"
+	# Only nats_url gates startup: the controlplane does not enforce join
+	# tokens yet (TOFU — architecture.md decision #14; enforcement is the
+	# design-partner gate tracked in the backlog). Requiring a token here
+	# blocked the first real firewall attach on the Mu bench (2026-06-12)
+	# with a value nothing consumes. When token enforcement lands, the
+	# agent itself will fail the NATS connect with a clear error — this
+	# gate doesn't need to pre-empt it.
+	if [ -z "$nats_url" ]; then
+		logger -t rasputin-agent "seed not configured (nats_url blank); sleeping 60s"
 		sleep 60
 		exit 1
 	fi
