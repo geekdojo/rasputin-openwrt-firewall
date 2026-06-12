@@ -71,10 +71,11 @@ jobs:
           GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep in sync with release.yml. v0.2.1 adds the IDS startup
-          # log line on top of v0.2.0's IDS subsystem (see release.yml
-          # comment for the full history).
-          VER=0.2.1
+          # Keep in sync with release.yml. v0.5.0 is the real ubus/UCI
+          # backend (firewall intents → live UCI + kernel nftables) on top
+          # of the v0.2.x IDS subsystem — see release.yml for the full
+          # history.
+          VER=0.5.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \

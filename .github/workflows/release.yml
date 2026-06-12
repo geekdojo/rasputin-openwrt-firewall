@@ -134,7 +134,14 @@ jobs:
           # IDS subsystem alive?" can grep for it instead of resorting to
           # the manual `echo >> alert_fast.txt` bisect trick we needed on
           # the dev.1 → dev.2 bring-up.
-          VER=0.2.1
+          # v0.5.0 (2026-06-12): the REAL OpenWrt ubus/UCI backend — the
+          # agent now applies firewall intents to live UCI + kernel nftables
+          # (autodetects uci on PATH + /etc/config/firewall present) instead
+          # of the file-backed mock. Hardware-validated on the CWWK. Also
+          # carries sd_notify support (no-op under procd) and the IDS path
+          # unchanged. This is the build that makes the firewall tab real on
+          # shipped images.
+          VER=0.5.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
