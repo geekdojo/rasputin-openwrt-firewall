@@ -28,11 +28,13 @@
 set -euo pipefail
 
 RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.gz"
-# Bumped 2026-06-09: snort.org refreshed the Community Rules between the
-# dev.2 pin (df1de9995bc6...) and dev.4 — Talos publishes new versions
-# regularly (~weekly cadence). The SHA mismatch caught dev.4 CI exactly
-# as designed; bumping the pin here is the routine refresh path.
-PINNED_SHA="bb947bc0253022a58cfa67c0e7957547654a680595dff313027c2e785ad63de5"
+# Talos publishes new Community Rules ~weekly, so this pin drifts and the
+# SHA check fails CI by design; bumping it is the routine refresh path.
+# History: dev.2 (df1de9995bc6...) → dev.4 (bb947bc02530...) → dev.8
+# (d891178755d7..., 2026-06-12, ~4017 rules). Recurring toil; a stable
+# org mirror of the tarball is a backlog item so the firewall build stops
+# breaking on upstream's cadence.
+PINNED_SHA="d891178755d72c8739f5f7889fc3990510a7711a5de09c3ba8b15a90df0bdcc7"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
