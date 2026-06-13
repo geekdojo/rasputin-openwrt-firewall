@@ -18,6 +18,7 @@ SEED=/etc/rasputin/seed.env
 
 # Defaults — overridden by seed.env if present.
 RASPUTIN_NODE_ROLE=firewall
+RASPUTIN_NODE_ID=
 RASPUTIN_NATS_URL=
 RASPUTIN_CP_JOIN_TOKEN=
 
@@ -37,50 +38,56 @@ fi
 # DMI sources in priority order, skip known placeholders, and fall
 # through to /etc/machine-id (a per-install UUID — stable across reboots,
 # regenerates on a re-flash, which is the right semantics).
-NODE_ID=""
-for src in /sys/class/dmi/id/board_serial \
-           /sys/class/dmi/id/product_serial \
-           /sys/class/dmi/id/chassis_serial; do
-	[ -f "$src" ] || continue
-	# Trim trailing newline + leading/trailing whitespace; collapse internal
-	# whitespace runs (sometimes seen in vendor strings).
-	candidate=$(awk '{$1=$1; print}' "$src" 2>/dev/null)
-	case "$candidate" in
-		"" | \
-		"Default string" | \
-		"To Be Filled By O.E.M." | \
-		"To be filled by O.E.M." | \
-		"System Serial Number" | \
-		"Not Specified" | \
-		"Not Applicable" | \
-		"None" | \
-		"O.E.M." | \
-		"OEM" | \
-		"0123456789")
-			continue ;;
-		*)
-			NODE_ID="$candidate"
-			break ;;
-	esac
-done
-# DMI didn't give us anything usable. Fall through to a persistent UUID
-# we manage ourselves at /etc/rasputin/node-id. OpenWrt doesn't ship
-# /etc/machine-id (that's a systemd convention; OpenWrt uses procd).
-# /etc/rasputin/ is in the sysupgrade keep-list (see
-# files/lib/upgrade/keep.d/rasputin) so this id is stable across reboots
-# AND across sysupgrade, but regenerates on a true re-flash (overlay
-# wiped). That's exactly the identity semantics we want — same box +
-# same install = same node_id; different box OR fresh re-flash = new
-# identity. The kernel's /proc/sys/kernel/random/uuid gives us a v4 UUID
-# without a userspace tool dependency.
-NODE_ID_FILE=/etc/rasputin/node-id
+# A provisioning matched set ASSIGNS the node id in the seed and binds the
+# join token to it (token-provisioning-pipeline.md §3) — so a seed-provided id
+# wins over the on-box derivation, otherwise the bound token wouldn't match.
+# Hand-flashed / un-provisioned boxes (blank seed id) still self-derive below.
+NODE_ID="${RASPUTIN_NODE_ID:-}"
 if [ -z "$NODE_ID" ]; then
-	if [ ! -s "$NODE_ID_FILE" ]; then
-		mkdir -p "$(dirname "$NODE_ID_FILE")"
-		cat /proc/sys/kernel/random/uuid > "$NODE_ID_FILE" 2>/dev/null || true
-		chmod 0644 "$NODE_ID_FILE" 2>/dev/null || true
+	for src in /sys/class/dmi/id/board_serial \
+	           /sys/class/dmi/id/product_serial \
+	           /sys/class/dmi/id/chassis_serial; do
+		[ -f "$src" ] || continue
+		# Trim trailing newline + leading/trailing whitespace; collapse internal
+		# whitespace runs (sometimes seen in vendor strings).
+		candidate=$(awk '{$1=$1; print}' "$src" 2>/dev/null)
+		case "$candidate" in
+			"" | \
+			"Default string" | \
+			"To Be Filled By O.E.M." | \
+			"To be filled by O.E.M." | \
+			"System Serial Number" | \
+			"Not Specified" | \
+			"Not Applicable" | \
+			"None" | \
+			"O.E.M." | \
+			"OEM" | \
+			"0123456789")
+				continue ;;
+			*)
+				NODE_ID="$candidate"
+				break ;;
+		esac
+	done
+	# DMI didn't give us anything usable. Fall through to a persistent UUID
+	# we manage ourselves at /etc/rasputin/node-id. OpenWrt doesn't ship
+	# /etc/machine-id (that's a systemd convention; OpenWrt uses procd).
+	# /etc/rasputin/ is in the sysupgrade keep-list (see
+	# files/lib/upgrade/keep.d/rasputin) so this id is stable across reboots
+	# AND across sysupgrade, but regenerates on a true re-flash (overlay
+	# wiped). That's exactly the identity semantics we want — same box +
+	# same install = same node_id; different box OR fresh re-flash = new
+	# identity. The kernel's /proc/sys/kernel/random/uuid gives us a v4 UUID
+	# without a userspace tool dependency.
+	NODE_ID_FILE=/etc/rasputin/node-id
+	if [ -z "$NODE_ID" ]; then
+		if [ ! -s "$NODE_ID_FILE" ]; then
+			mkdir -p "$(dirname "$NODE_ID_FILE")"
+			cat /proc/sys/kernel/random/uuid > "$NODE_ID_FILE" 2>/dev/null || true
+			chmod 0644 "$NODE_ID_FILE" 2>/dev/null || true
+		fi
+		NODE_ID=$(cat "$NODE_ID_FILE" 2>/dev/null || true)
 	fi
-	NODE_ID=$(cat "$NODE_ID_FILE" 2>/dev/null || true)
 fi
 # Belt-and-suspenders for the (vanishingly unlikely) case where even the
 # kernel UUID source failed — leaves the agent startable with a known-
