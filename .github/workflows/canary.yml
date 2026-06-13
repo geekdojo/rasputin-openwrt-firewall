@@ -75,7 +75,7 @@ jobs:
           # backend (firewall intents → live UCI + kernel nftables) on top
           # of the v0.2.x IDS subsystem — see release.yml for the full
           # history.
-          VER=0.5.0
+          VER=0.6.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \

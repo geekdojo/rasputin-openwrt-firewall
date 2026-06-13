@@ -141,7 +141,13 @@ jobs:
           # carries sd_notify support (no-op under procd) and the IDS path
           # unchanged. This is the build that makes the firewall tab real on
           # shipped images.
-          VER=0.5.0
+          # v0.6.0 (2026-06-13): bus join-token auth — the agent presents its
+          # node id + RASPUTIN_CP_JOIN_TOKEN to the controlplane's NATS
+          # auth-callout, which mints a per-node subject-scoped credential.
+          # No-op until the controlplane runs RASPUTIN_BUS_AUTH=enforce; also
+          # bakes /etc/rasputin/image-version (first firewall image to
+          # populate the node view's OS-image field).
+          VER=0.6.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
