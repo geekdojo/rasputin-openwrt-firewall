@@ -147,7 +147,11 @@ jobs:
           # No-op until the controlplane runs RASPUTIN_BUS_AUTH=enforce; also
           # bakes /etc/rasputin/image-version (first firewall image to
           # populate the node view's OS-image field).
-          VER=0.6.0
+          # v0.7.0 (2026-06-13): mDNS resolution of rasputin.local — the OpenWrt
+          # firewall has no .local resolver, so this is what lets the agent reach
+          # nats://rasputin.local:4222 in a provisioned matched set; plus
+          # node-bound join tokens. REQUIRED for the matched-set firewall.
+          VER=0.7.0
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
