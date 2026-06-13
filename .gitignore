@@ -17,6 +17,11 @@
 # Trust root injected by CI from vars.RASPUTIN_ROOT_CA_PEM
 /files/etc/rasputin/trust/root-ca.pem
 
+# OS image version (CalVer) baked into the overlay at build time by the
+# "Bake image version into overlay" workflow step; a committed file would go
+# stale. The Buildroot OS writes the same /etc/rasputin/image-version.
+/files/etc/rasputin/image-version
+
 # Per-deployment provisioning seed (the .template is committed; bare name
 # holds per-fleet secrets once filled).
 /files/etc/rasputin/seed.env

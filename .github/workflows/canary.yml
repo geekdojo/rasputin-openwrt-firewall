@@ -94,6 +94,16 @@ jobs:
       - name: Fetch Snort3 Community Rules
         run: ./scripts/fetch-snort-rules.sh
 
+      # Mirror release.yml: bake an image-version file into the overlay so the
+      # canary image matches the released layout. Canary computes no CalVer
+      # (it's a drift-detection build, not a release), so a clearly-labelled
+      # placeholder is used. Build-generated, gitignored — never committed.
+      - name: Bake image version into overlay
+        run: |
+          mkdir -p files/etc/rasputin
+          printf '%s\n' "0.0.0-canary" \
+            > files/etc/rasputin/image-version
+
       - name: ImageBuilder build
         env:
           PROFILE: generic

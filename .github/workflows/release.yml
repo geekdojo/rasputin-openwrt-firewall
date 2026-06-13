@@ -168,6 +168,18 @@ jobs:
       - name: Fetch Snort3 Community Rules
         run: ./scripts/fetch-snort-rules.sh
 
+      # Bake the OS image version (CalVer) into the overlay. The agent reads
+      # /etc/rasputin/image-version at startup and reports it on registration
+      # so the control-plane UI can show which image each node runs — critical
+      # for troubleshooting and support. The Buildroot OS writes the same file
+      # at its build time. Build-generated, NOT committed (a static file would
+      # go stale); files/etc/rasputin/image-version is gitignored.
+      - name: Bake image version into overlay
+        run: |
+          mkdir -p files/etc/rasputin
+          printf '%s\n' "${{ steps.ver.outputs.version }}" \
+            > files/etc/rasputin/image-version
+
       - name: ImageBuilder build
         env:
           PROFILE: generic
