@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# 96-rasputin-dropbear-harden — first-boot SSH hardening for the firewall.
+#
+# Runs before 99-rasputin (uci-defaults execute in sorted order, then self-
+# delete). Stock OpenWrt ships root with an EMPTY password and dropbear
+# accepting password auth on the LAN — unacceptable for the security node.
+#
+# If a baked authorized_keys is present (injected at build from the
+# RASPUTIN_SSH_AUTHORIZED_KEY org variable), switch SSH to key-only: disable
+# password auth entirely, so there is no LAN-reachable passwordless root and no
+# passwordless window. If no key was baked (a dev image), leave password auth on
+# but warn loudly — disabling it without a key would lock the box out.
+#
+# Scope: this hardens the NETWORK vector (dropbear). Console/serial root stays
+# as-is (physical access); a console password is a separate follow-up.
+
+set -eu
+
+KEYS=/etc/dropbear/authorized_keys
+
+if [ -s "$KEYS" ]; then
+	uci -q batch <<'EOF'
+set dropbear.@dropbear[0].PasswordAuth='off'
+set dropbear.@dropbear[0].RootPasswordAuth='off'
+commit dropbear
+EOF
+	logger -t rasputin "dropbear hardened: key-only SSH (password auth disabled)"
+else
+	logger -t rasputin "WARNING: no baked SSH key (RASPUTIN_SSH_AUTHORIZED_KEY unset) — dropbear password auth left ON; this image has passwordless root. DEV ONLY."
+fi
+
+exit 0

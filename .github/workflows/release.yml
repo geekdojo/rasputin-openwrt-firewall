@@ -175,6 +175,25 @@ jobs:
             echo "::warning::RASPUTIN_ROOT_CA_PEM org variable is empty — image will ship without a verifiable trust root"
           fi
 
+      # Bake root's SSH authorized_keys from an org/repo variable so the firewall
+      # ships key-only (the 96-rasputin-dropbear-harden uci-defaults disables
+      # password auth when this file is non-empty) — no LAN-reachable passwordless
+      # root. Empty variable → empty file → harden script leaves password auth on
+      # and warns (dev image, avoids a lockout). Mirrors the trust-root pattern.
+      - name: Inject SSH authorized key (key-only SSH)
+        env:
+          SSH_KEY: ${{ vars.RASPUTIN_SSH_AUTHORIZED_KEY }}
+        run: |
+          mkdir -p files/etc/dropbear
+          if printf '%s' "$SSH_KEY" | grep -q '[^[:space:]]'; then
+            printf '%s\n' "$SSH_KEY" > files/etc/dropbear/authorized_keys
+            chmod 600 files/etc/dropbear/authorized_keys
+            echo "baked $(grep -c . files/etc/dropbear/authorized_keys) authorized SSH key line(s) — image is key-only"
+          else
+            : > files/etc/dropbear/authorized_keys
+            echo "::warning::RASPUTIN_SSH_AUTHORIZED_KEY is empty — image ships with passwordless root (DEV ONLY). Set the variable to enable key-only SSH."
+          fi
+
       # Bake the pinned ET Open snort3 ruleset into files/etc/snort/.
       # ImageBuilder consumes files/ verbatim — the rules must be on disk
       # BEFORE `make image` runs. The script is idempotent and pins the
