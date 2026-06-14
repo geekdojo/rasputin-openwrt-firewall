@@ -151,7 +151,11 @@ jobs:
           # firewall has no .local resolver, so this is what lets the agent reach
           # nats://rasputin.local:4222 in a provisioned matched set; plus
           # node-bound join tokens. REQUIRED for the matched-set firewall.
-          VER=0.7.0
+          # v0.7.1 (2026-06-13): mDNS multi-homed fix — query on EVERY interface,
+          # not just the default multicast route (which the firewall sends out its
+          # WAN, where the control plane isn't). Without this, rasputin.local never
+          # resolved on the firewall. Confirmed on the bench.
+          VER=0.7.1
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
