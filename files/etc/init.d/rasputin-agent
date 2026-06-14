@@ -30,9 +30,14 @@ start_service() {
 	# agent itself will fail the NATS connect with a clear error — this
 	# gate doesn't need to pre-empt it.
 	if [ -z "$nats_url" ]; then
-		logger -t rasputin-agent "seed not configured (nats_url blank); sleeping 60s"
-		sleep 60
-		exit 1
+		# No seed yet (fresh flash, pre-provision). Open NO procd instance and
+		# return cleanly. Do not `sleep 60; exit 1`: start_service isn't a
+		# supervised instance so procd never respawns it, and the blocking sleep
+		# races the config-change reload trigger — together that left a freshly
+		# flashed firewall's agent down after first-boot seeding. apply-seed
+		# restarts us once the seed lands; the reload trigger covers later edits.
+		logger -t rasputin-agent "seed not configured (nats_url blank); not starting until seeded"
+		return 0
 	fi
 
 	procd_open_instance

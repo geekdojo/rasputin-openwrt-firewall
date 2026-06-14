@@ -115,9 +115,14 @@ set rasputin.main.node_id='${NODE_ID}'
 commit rasputin
 EOF
 
-# If the agent is running, nudge it to re-read the config.
+# (Re)start the agent so a freshly-seeded box comes up without a manual start.
+# `restart` = stop (a harmless no-op if already down) + start, so it brings the
+# agent up whether or not it was running. The old `reload`-if-running left a
+# fresh-flashed firewall's agent DOWN after first-boot seeding, because the init
+# script opens no procd instance while nats_url is blank (so there was nothing
+# running to reload). Found on the bench dev.11 final-flash, 2026-06-14.
 if /etc/init.d/rasputin-agent enabled 2>/dev/null; then
-	/etc/init.d/rasputin-agent running 2>/dev/null && /etc/init.d/rasputin-agent reload || true
+	/etc/init.d/rasputin-agent restart 2>/dev/null || true
 fi
 
 logger -t rasputin "apply-seed: complete (seed populated: $([ -f "$SEED" ] && echo yes || echo no))"
