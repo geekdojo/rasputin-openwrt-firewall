@@ -31,10 +31,10 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # Talos publishes new Community Rules ~weekly, so this pin drifts and the
 # SHA check fails CI by design; bumping it is the routine refresh path.
 # History: dev.2 (df1de9995bc6...) → dev.4 (bb947bc02530...) → dev.8
-# (d891178755d7..., 2026-06-12, ~4017 rules). Recurring toil; a stable
-# org mirror of the tarball is a backlog item so the firewall build stops
-# breaking on upstream's cadence.
-PINNED_SHA="d891178755d72c8739f5f7889fc3990510a7711a5de09c3ba8b15a90df0bdcc7"
+# (d891178755d7..., 2026-06-12, ~4017 rules) → dev.13 (643dfc20e363...,
+# 2026-06-17). Recurring toil; a stable org mirror of the tarball is a
+# backlog item so the firewall build stops breaking on upstream's cadence.
+PINNED_SHA="643dfc20e36363db5ddd7640cb9059efda8e509071be57004953134719b593f6"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
