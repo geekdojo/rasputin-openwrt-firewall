@@ -10,6 +10,22 @@ luci-ssl                 # LuCI over HTTPS (uhttpd + ustream-ssl)
 # --- Tunneling ---
 wireguard-tools          # WireGuard userspace (kmod is implicit in modern OpenWrt)
 
+# --- Mesh (Tailscale/Headscale control-plane overlay) ---
+# tailscaled is the userspace mesh daemon the rasputin-agent autodetects
+# (exec.LookPath("tailscale")) and drives on mesh enrollment: it writes the
+# per-installation Mesh CA bundle to /etc/rasputin/mesh/tailscaled-ca.pem,
+# restarts the daemon (/etc/init.d/tailscale restart), then runs
+# `tailscale up --login-server=https://<headscale> --auth-key=...`.
+# OpenWrt 25.12.4 x86_64 ships tailscale-1.98.3-r1 in the packages feed.
+tailscale                # tailscaled + tailscale CLI (verified 25.12.4: 1.98.3-r1)
+kmod-tun                 # /dev/net/tun — tailscaled creates the tailscale0 TUN
+                         # (verified 25.12.4 x86/64 kmods: kmod-tun-6.12.87-r1)
+ca-bundle                # public CA roots → /etc/ssl/certs/ca-certificates.crt,
+                         # which Go's crypto/x509 reads in ADDITION to
+                         # SSL_CERT_FILE, so Tailscale DERP's public TLS roots
+                         # still validate alongside the per-install Mesh CA.
+                         # (verified 25.12.4 base: ca-bundle-20260223-r1)
+
 # --- Firewall + NAT ---
 nftables                 # already default in modern OpenWrt; explicit for clarity
 kmod-nft-offload         # nftables software flowtable offload (no HW offload on i226-V)

@@ -55,6 +55,13 @@ start_service() {
 	# in the sysupgrade keep-list (files/lib/upgrade/keep.d/rasputin), so
 	# update state survives the upgrade reboot it is meant to track.
 	procd_append_param env RASPUTIN_AGENT_STATE_DIR=/etc/rasputin/agent-state
+	# Mesh CA bundle path. On mesh enrollment the agent writes the
+	# per-installation Mesh CA here so tailscaled can trust the self-hosted
+	# headscale's TLS (tailscaled reads it via SSL_CERT_FILE — set in
+	# files/etc/uci-defaults/99-rasputin). MUST be on the overlay (/var is
+	# tmpfs) and in the sysupgrade keep-list so the trust root survives both
+	# reboot and upgrade — /etc/rasputin/mesh/ is in keep.d/rasputin.
+	procd_append_param env RASPUTIN_MESH_CA_BUNDLE=/etc/rasputin/mesh/tailscaled-ca.pem
 
 	procd_set_param respawn 3600 5 10   # threshold/timeout/retry (procd defaults shape)
 	procd_set_param stdout 1

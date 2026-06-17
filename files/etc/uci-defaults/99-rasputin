@@ -107,9 +107,38 @@ set snort.snort.include='/etc/snort/rasputin-extra.lua'
 commit snort
 EOF
 
+# --- Mesh CA trust for tailscaled ---
+#
+# tailscaled is a Go daemon and trusts the self-hosted headscale's TLS via
+# the system cert pool. The per-installation Mesh CA isn't a public root, so
+# the rasputin-agent installs it on mesh enrollment: it APPENDS the Mesh CA
+# to /etc/ssl/certs/ca-certificates.crt — the first path Go's crypto/x509
+# reads — then runs `/etc/init.d/tailscale restart`. Public DERP roots stay
+# trusted (they're in the same bundle, shipped by ca-bundle). No env hook is
+# needed in the stock tailscale init, which is why we do it agent-side: that
+# init reads only log/port/state_file/fw_mode from UCI and forwards no
+# arbitrary env to the daemon, and we must not override it (the package
+# replaces its init on upgrade).
+#
+# The agent ALSO writes the CA to RASPUTIN_MESH_CA_BUNDLE
+# (/etc/rasputin/mesh/tailscaled-ca.pem, env on the agent service below) — on
+# this image that copy is the persistent record used to re-heal trust; on the
+# Buildroot OS (read-only /etc) the same file is what tailscaled reads via
+# SSL_CERT_FILE. One agent, both mechanisms; each no-ops where it doesn't fit.
+#
+# KNOWN FOLLOW-UP: a `ca-bundle` package upgrade (only via sysupgrade, not a
+# plain reboot — /etc is the persistent overlay) rewrites
+# /etc/ssl/certs/ca-certificates.crt and drops the appended Mesh CA. Trust is
+# restored on the next mesh enroll/reconcile; a boot-time re-append from the
+# persisted RASPUTIN_MESH_CA_BUNDLE copy is the planned hardening (tracked in
+# the wiki backlog). BENCH-VERIFY: after enroll, `tailscale status` Running +
+# the CA present in /etc/ssl/certs/ca-certificates.crt.
+mkdir -p /etc/rasputin/mesh /etc/tailscale
+
 # --- Enable services (do not start yet — uci-defaults runs pre-procd) ---
 /etc/init.d/rasputin-agent enable
 /etc/init.d/snort enable
+/etc/init.d/tailscale enable
 
 logger -t rasputin "99-rasputin: provisioning complete"
 exit 0

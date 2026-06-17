@@ -1,0 +1,42 @@
+#
+# Tailscale (mesh overlay) UCI config for the Rasputin firewall (Node N).
+#
+# The OpenWrt tailscale package's init script (/etc/init.d/tailscale,
+# shipped by the package — do NOT override it, it is replaced on upgrade)
+# reads exactly these options from this file via `config_load tailscale`:
+#   log_stdout, log_stderr, port, state_file, fw_mode
+# (verified against openwrt/packages net/tailscale tailscale.init on the
+# 24.10, 25.12 and master branches — all identical, 2026-06-17).
+#
+# We ship this file for two reasons:
+#
+# 1. STATE PERSISTENCE. tailscaled's node state (machine key, the headscale
+#    node identity, the mesh auth) lives in `state_file`. The package
+#    default is already /etc/tailscale/tailscaled.state — on the overlay
+#    (persistent), NOT under /var (tmpfs, wiped every reboot). We pin it
+#    explicitly so a future package-default change can't silently move it
+#    onto tmpfs and de-enroll the firewall on every reboot, and so the
+#    path is unambiguous for the keep.d sysupgrade preserve-list. Both
+#    /etc/tailscale/ (state) and this file are listed in
+#    files/lib/upgrade/keep.d/rasputin so enrollment survives sysupgrade.
+#
+# 2. fw_mode=nftables. Rasputin's firewall is nftables-only (see
+#    packages.txt: nftables + kmod-nft-offload, no iptables-nft shim).
+#    tailscaled defaults to nftables here too, but pinning it documents
+#    the dependency and guards against a default flip.
+#
+# NOTE on Mesh CA trust: the per-installation Mesh CA that lets tailscaled
+# trust the self-hosted headscale's TLS is installed by rasputin-agent on
+# enrollment — it appends the CA to /etc/ssl/certs/ca-certificates.crt (the
+# stock init can't inject env into the daemon, so SSL_CERT_FILE isn't used on
+# this image). See files/etc/uci-defaults/99-rasputin.
+#
+config settings 'settings'
+	option log_stdout '1'
+	option log_stderr '1'
+	option port '41641'
+	# Persistent overlay path — survives reboot (NOT on /var tmpfs) and,
+	# via keep.d/rasputin, survives sysupgrade.
+	option state_file '/etc/tailscale/tailscaled.state'
+	# Rasputin is nftables-only.
+	option fw_mode 'nftables'

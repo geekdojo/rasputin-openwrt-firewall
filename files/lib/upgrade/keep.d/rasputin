@@ -41,3 +41,24 @@
 #                              backlog item).
 /etc/config/snort
 /etc/snort/rules/local.rules
+
+# Tailscale (mesh overlay):
+#   - /etc/tailscale/             tailscaled state (machine key + headscale
+#                                 node identity, state_file pinned in
+#                                 /etc/config/tailscale). /var is tmpfs, so
+#                                 this lives on the overlay; it MUST survive
+#                                 sysupgrade or the firewall de-enrolls from
+#                                 the mesh on every firmware update and would
+#                                 need re-flashing the controlplane auth key.
+#   - /etc/config/tailscale       our state-path + fw_mode pin. We ship it in
+#                                 the overlay, but if the operator/controlplane
+#                                 ever edits it (e.g. port), that survives too.
+#   - /etc/rasputin/mesh/         per-installation Mesh CA bundle
+#                                 (tailscaled-ca.pem, RASPUTIN_MESH_CA_BUNDLE),
+#                                 written by rasputin-agent on enrollment and
+#                                 trusted by tailscaled via SSL_CERT_FILE.
+#                                 Covered by /etc/rasputin/ above, listed here
+#                                 explicitly for documentation.
+/etc/tailscale/
+/etc/config/tailscale
+/etc/rasputin/mesh/
