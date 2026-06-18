@@ -56,6 +56,21 @@ set firewall.@defaults[0].flow_offloading_hw='0'
 commit firewall
 EOF
 
+# --- mDNS resolution for rasputin.local via dnsmasq (mesh login server) ---
+# tailscaled connects to the mesh login server at https://rasputin.local:18080,
+# but OpenWrt/musl has no mDNS resolver so .local lookups fail (NXDOMAIN). The
+# agent already resolves rasputin.local over multicast DNS for NATS; its
+# hostsync loop republishes the address into /etc/rasputin/hosts (via
+# RASPUTIN_CP_HOSTS_DIR, set in the agent init). Point dnsmasq at that dir so
+# every local client — tailscaled included — resolves rasputin.local. dnsmasq
+# watches a hostsdir and auto-reloads when the agent updates it, so it self-
+# heals if the control plane's address changes (no DHCP reservation needed).
+mkdir -p /etc/rasputin/hosts
+uci -q batch <<'EOF'
+add_list dhcp.@dnsmasq[0].hostsdir='/etc/rasputin/hosts'
+commit dhcp
+EOF
+
 # --- Apply seed (writes /etc/config/rasputin; blank values are OK) ---
 /usr/lib/rasputin/apply-seed || logger -t rasputin "99-rasputin: apply-seed returned non-zero (continuing)"
 

@@ -159,7 +159,10 @@ jobs:
           # Mesh CA (appends to /etc/ssl/certs/ca-certificates.crt on OpenWrt) and
           # runs real `tailscale up` against the self-hosted Headscale. Pairs with
           # the tailscale/kmod-tun/ca-bundle packages added to packages.txt.
-          VER=0.8.0
+          # v0.8.3 (2026-06-18): agent hostsync republishes rasputin.local into the
+          # dnsmasq hostsdir (RASPUTIN_CP_HOSTS_DIR) so tailscaled resolves the mesh
+          # login server by name (musl has no mDNS); also the reconcile KIND fix.
+          VER=0.8.3
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
