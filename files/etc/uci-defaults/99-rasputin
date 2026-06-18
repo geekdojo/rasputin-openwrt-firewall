@@ -66,8 +66,15 @@ EOF
 # watches a hostsdir and auto-reloads when the agent updates it, so it self-
 # heals if the control plane's address changes (no DHCP reservation needed).
 mkdir -p /etc/rasputin/hosts
+# addnhosts (NOT hostsdir): OpenWrt's dnsmasq init only translates `addnhosts`
+# into the generated config (→ addn-hosts=); `hostsdir` is silently dropped
+# (bench 2026-06-18). addn-hosts accepts a directory and reads every file in
+# it. The agent's hostsync writes rasputin.local here and runs
+# `/etc/init.d/dnsmasq reload` (RASPUTIN_CP_HOSTS_RELOAD_CMD in the agent init)
+# after each change — addn-hosts files are not auto-watched, so the reload is
+# what makes the new entry (and CP-IP changes) take effect.
 uci -q batch <<'EOF'
-add_list dhcp.@dnsmasq[0].hostsdir='/etc/rasputin/hosts'
+add_list dhcp.@dnsmasq[0].addnhosts='/etc/rasputin/hosts'
 commit dhcp
 EOF
 

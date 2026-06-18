@@ -162,7 +162,10 @@ jobs:
           # v0.8.3 (2026-06-18): agent hostsync republishes rasputin.local into the
           # dnsmasq hostsdir (RASPUTIN_CP_HOSTS_DIR) so tailscaled resolves the mesh
           # login server by name (musl has no mDNS); also the reconcile KIND fix.
-          VER=0.8.3
+          # v0.8.5 (2026-06-18): hostsync reloads dnsmasq after writing
+          # (RASPUTIN_CP_HOSTS_RELOAD_CMD) — addn-hosts isn't auto-watched, so the
+          # entry needs a reload to take effect on a clean boot / CP-IP change.
+          VER=0.8.5
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \

@@ -62,11 +62,14 @@ start_service() {
 	# tmpfs) and in the sysupgrade keep-list so the trust root survives both
 	# reboot and upgrade — /etc/rasputin/mesh/ is in keep.d/rasputin.
 	procd_append_param env RASPUTIN_MESH_CA_BUNDLE=/etc/rasputin/mesh/tailscaled-ca.pem
-	# Republish rasputin.local (resolved over mDNS for NATS) into this dnsmasq
-	# hostsdir so tailscaled — which can't do mDNS on musl — resolves the mesh
-	# login server at https://rasputin.local. dnsmasq watches the dir (set in
-	# 99-rasputin) and auto-reloads. Unset on rasputin-os (resolved does mDNS).
+	# Republish rasputin.local (resolved over mDNS for NATS) into a dnsmasq
+	# addn-hosts dir so tailscaled — which can't do mDNS on musl — resolves the
+	# mesh login server at https://rasputin.local. dnsmasq doesn't auto-watch
+	# addn-hosts, so hostsync runs RASPUTIN_CP_HOSTS_RELOAD_CMD after each change
+	# to make it (and CP-IP changes) take effect. Both unset on rasputin-os
+	# (systemd-resolved does mDNS natively).
 	procd_append_param env RASPUTIN_CP_HOSTS_DIR=/etc/rasputin/hosts
+	procd_append_param env RASPUTIN_CP_HOSTS_RELOAD_CMD="/etc/init.d/dnsmasq reload"
 
 	procd_set_param respawn 3600 5 10   # threshold/timeout/retry (procd defaults shape)
 	procd_set_param stdout 1
