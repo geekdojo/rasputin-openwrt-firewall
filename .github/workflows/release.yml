@@ -10,9 +10,13 @@ name: release
 #     rasputin-os; see os-images/release-pipeline.md §3)
 #
 # Triggers:
-#   - push of a CalVer tag (e.g. 2026.06.0 or 2026.06.0-dev.1)
+#   - push of a CalVer tag (e.g. 2026.07.1 or 2026.07.1-dev.1)
 #                                       → validate + build + smoke + sign+release
-#   - manual dispatch (full_build=true) → validate + build + smoke (no release)
+#   - manual dispatch (full_build=true) → validate + build + smoke (no release, bench)
+#   - manual dispatch (publish=true)    → build + sign + publish a dev release,
+#       versioned ${vars.RASPUTIN_VERSION}-dev.<run> (dev.N = run number). The
+#       release base comes from the org var RASPUTIN_VERSION, shared with
+#       rasputin-os / -control-plane for lockstep. Implies full_build.
 #   - manual dispatch (full_build=false) → validate only (default, cheap)
 
 on:
@@ -23,6 +27,10 @@ on:
     inputs:
       full_build:
         description: "Run the ImageBuilder build + smoke (defaults to validate-only)"
+        type: boolean
+        default: false
+      publish:
+        description: "Sign + publish this build as a dev release (versioned from org var RASPUTIN_VERSION). Implies full_build."
         type: boolean
         default: false
 
@@ -65,13 +73,17 @@ jobs:
     # full_build arrives as a real boolean from the UI checkbox but as the
     # STRING "true" via the API / `gh -f`. Accept both. (Same gotcha as
     # rasputin-os.)
-    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true')) }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Compute version (CalVer)
         id: ver
+        # TARGET_VERSION = org var RASPUTIN_VERSION (current dev target,
+        # YYYY.MM.MICRO), shared across the three Rasputin repos for lockstep.
+        env:
+          TARGET_VERSION: ${{ vars.RASPUTIN_VERSION }}
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
@@ -80,7 +92,11 @@ jobs:
               *)      echo "channel=stable" >> "$GITHUB_OUTPUT" ;;
             esac
           else
-            echo "version=$(date -u +%Y.%m.0)-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            if [ -z "${TARGET_VERSION}" ]; then
+              echo "::error::org var RASPUTIN_VERSION is unset — set it to the current dev target (e.g. 2026.07.1): gh variable set RASPUTIN_VERSION --org geekdojo --body 2026.07.1 --visibility all"
+              exit 1
+            fi
+            echo "version=${TARGET_VERSION}-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
             echo "channel=dev" >> "$GITHUB_OUTPUT"
           fi
 
@@ -333,7 +349,7 @@ jobs:
     # prompt — that's enough to confirm the image isn't structurally broken.
     # It does NOT validate the i226-V driver, line-rate, or NAT — that's
     # hardware-only.
-    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true'))) }}
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     steps:
       - name: Install QEMU + OVMF
@@ -390,7 +406,8 @@ jobs:
 
   sign-and-release:
     needs: [build, smoke-fw]
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    # Publishes on a tag OR on a dispatch with publish=true (run-number dev release).
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -399,8 +416,17 @@ jobs:
 
       - name: Compute version
         id: ver
+        env:
+          TARGET_VERSION: ${{ vars.RASPUTIN_VERSION }}
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            if [ -z "${TARGET_VERSION}" ]; then
+              echo "::error::org var RASPUTIN_VERSION is unset — cannot publish a dev release"; exit 1
+            fi
+            VERSION="${TARGET_VERSION}-dev.${GITHUB_RUN_NUMBER}"
+          fi
           case "$VERSION" in
             *-dev*) CHANNEL=dev    ; PRERELEASE=true  ;;
             *)      CHANNEL=stable ; PRERELEASE=false ;;
