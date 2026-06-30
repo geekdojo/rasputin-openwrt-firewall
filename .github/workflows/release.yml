@@ -57,7 +57,8 @@ jobs:
       - name: Repo structure
         run: |
           set -e
-          req="README.md packages.txt scripts/init-imagebuilder.sh
+          req="README.md packages.txt agent-version.txt
+               scripts/init-imagebuilder.sh
                scripts/fetch-snort-rules.sh
                files/etc/init.d/rasputin-agent
                files/etc/uci-defaults/99-rasputin
@@ -138,50 +139,13 @@ jobs:
           GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Pinned agent version. Bump when the controlplane cuts a new
-          # release; in the longer term this becomes a per-release input.
-          # v0.2.0 (2026-06-08): adds the IDS subsystem (snort3 alert_fast
-          # tailer + NATS publish on firewall-role agents). Required for
-          # the IDS pipeline to fire end-to-end on the firewall image —
-          # v0.1.0 didn't have it and was the silent-IDS bug on the CWWK
-          # bring-up.
-          # v0.2.1 (2026-06-09): adds the "ids: tailer started, path=...,
-          # subject=..." startup log line so operators bisecting "is the
-          # IDS subsystem alive?" can grep for it instead of resorting to
-          # the manual `echo >> alert_fast.txt` bisect trick we needed on
-          # the dev.1 → dev.2 bring-up.
-          # v0.5.0 (2026-06-12): the REAL OpenWrt ubus/UCI backend — the
-          # agent now applies firewall intents to live UCI + kernel nftables
-          # (autodetects uci on PATH + /etc/config/firewall present) instead
-          # of the file-backed mock. Hardware-validated on the CWWK. Also
-          # carries sd_notify support (no-op under procd) and the IDS path
-          # unchanged. This is the build that makes the firewall tab real on
-          # shipped images.
-          # v0.6.0 (2026-06-13): bus join-token auth — the agent presents its
-          # node id + RASPUTIN_CP_JOIN_TOKEN to the controlplane's NATS
-          # auth-callout, which mints a per-node subject-scoped credential.
-          # No-op until the controlplane runs RASPUTIN_BUS_AUTH=enforce; also
-          # bakes /etc/rasputin/image-version (first firewall image to
-          # populate the node view's OS-image field).
-          # v0.7.0 (2026-06-13): mDNS resolution of rasputin.local — the OpenWrt
-          # firewall has no .local resolver, so this is what lets the agent reach
-          # nats://rasputin.local:4222 in a provisioned matched set; plus
-          # node-bound join tokens. REQUIRED for the matched-set firewall.
-          # v0.7.1 (2026-06-13): mDNS multi-homed fix — query on EVERY interface,
-          # not just the default multicast route (which the firewall sends out its
-          # WAN, where the control plane isn't). Without this, rasputin.local never
-          # resolved on the firewall. Confirmed on the bench.
-          # v0.8.0 (2026-06-17): mesh goes real — agent installs the per-installation
-          # Mesh CA (appends to /etc/ssl/certs/ca-certificates.crt on OpenWrt) and
-          # runs real `tailscale up` against the self-hosted Headscale. Pairs with
-          # the tailscale/kmod-tun/ca-bundle packages added to packages.txt.
-          # v0.8.3 (2026-06-18): agent hostsync republishes rasputin.local into the
-          # dnsmasq hostsdir (RASPUTIN_CP_HOSTS_DIR) so tailscaled resolves the mesh
-          # login server by name (musl has no mDNS); also the reconcile KIND fix.
-          # v0.8.5 (2026-06-18): hostsync reloads dnsmasq after writing
-          # (RASPUTIN_CP_HOSTS_RELOAD_CMD) — addn-hosts isn't auto-watched, so the
-          # entry needs a reload to take effect on a clean boot / CP-IP change.
-          VER=0.8.5
+          # Pinned agent version — SINGLE SOURCE OF TRUTH is ./agent-version.txt
+          # (shared with canary.yml so the two can't drift). Bump there, with a
+          # changelog entry; the version must already be published on the
+          # control-plane repo. First non-comment line = the bare semver.
+          VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
+          [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \

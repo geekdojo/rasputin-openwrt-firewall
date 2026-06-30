@@ -1,0 +1,32 @@
+# Pinned rasputin-agent release baked into the firewall image.
+#
+# SINGLE SOURCE OF TRUTH — both .github/workflows/release.yml and canary.yml
+# read this file, so the pin can NEVER drift between them. To bump the agent:
+# edit the bare version line at the bottom (and add a changelog entry).
+#
+# The agent is downloaded as a pre-built amd64 tarball from the PRIVATE
+# geekdojo/rasputin-control-plane release `v<this>` (static CGO_ENABLED=0 Go,
+# runs on OpenWrt musl). The version must ALREADY be published there before a
+# firewall build that pins it — the build downloads it by URL.
+#
+# Format: lines starting with `#` and blank lines are ignored; the first
+# remaining line is the bare semver (no leading `v`).
+#
+# Changelog (why each bump):
+#   v0.2.0 (2026-06-08): IDS subsystem — snort3 alert_fast tailer + NATS publish
+#                        on firewall-role agents (required for the IDS pipeline).
+#   v0.2.1 (2026-06-09): "ids: tailer started, path=…, subject=…" startup log line.
+#   v0.5.0 (2026-06-12): REAL OpenWrt ubus/UCI backend — applies firewall intents
+#                        to live UCI + kernel nftables (autodetect); + sd_notify.
+#   v0.6.0 (2026-06-13): bus join-token auth; bakes /etc/rasputin/image-version.
+#   v0.7.0 (2026-06-13): mDNS resolution of rasputin.local + node-bound tokens
+#                        (REQUIRED for the matched-set firewall — musl has no .local).
+#   v0.7.1 (2026-06-13): mDNS multi-homed fix — query EVERY interface, not just the
+#                        default multicast route (which exits the WAN).
+#   v0.8.0 (2026-06-17): mesh goes real — installs the Mesh CA + `tailscale up`
+#                        against self-hosted Headscale (pairs with the tailscale pkgs).
+#   v0.8.3 (2026-06-18): hostsync republishes rasputin.local into the dnsmasq
+#                        hostsdir so tailscaled resolves the mesh login server.
+#   v0.8.5 (2026-06-18): hostsync reloads dnsmasq after writing (addn-hosts isn't
+#                        auto-watched — needed on a clean boot / CP-IP change).
+0.8.5

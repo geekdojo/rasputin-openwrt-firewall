@@ -72,11 +72,12 @@ jobs:
           GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep in sync with release.yml. v0.5.0 is the real ubus/UCI
-          # backend (firewall intents → live UCI + kernel nftables) on top
-          # of the v0.2.x IDS subsystem — see release.yml for the full
-          # history.
-          VER=0.6.0
+          # Pinned agent version — read from ./agent-version.txt, the SAME
+          # single source release.yml uses, so this build mirrors a real
+          # release and the pin can't drift. Bump in agent-version.txt only.
+          VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
+          [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
