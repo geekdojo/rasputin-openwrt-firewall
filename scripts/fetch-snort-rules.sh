@@ -32,9 +32,11 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # SHA check fails CI by design; bumping it is the routine refresh path.
 # History: dev.2 (df1de9995bc6...) → dev.4 (bb947bc02530...) → dev.8
 # (d891178755d7..., 2026-06-12, ~4017 rules) → dev.13 (643dfc20e363...,
-# 2026-06-17). Recurring toil; a stable org mirror of the tarball is a
-# backlog item so the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="e913e956ce1ee2b235a93eaa3d593c2f6675416156a0ffa1898d4300eb8867c3"
+# 2026-06-17) → e913e956ce1e... → 2026-06-29 (11b59e5041af..., ~4017
+# rules; caught by the weekly canary run). Recurring toil; a stable org
+# mirror of the tarball is a backlog item so the firewall build stops
+# breaking on upstream's cadence.
+PINNED_SHA="11b59e5041afc40d1147ece5962caa77e71350b6120e6fc3ce8ef3db0a677e59"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
