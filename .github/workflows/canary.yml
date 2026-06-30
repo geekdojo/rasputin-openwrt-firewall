@@ -14,7 +14,8 @@ name: canary
 #     re-validation, not automation).
 #
 # Detection is automated; decision (cut a new MICRO?) is always human.
-# See backlog.md and the release-cadence discussion for the rationale.
+# See the wiki backlog (projects/rasputin/backlog/) and the release-cadence
+# discussion for the rationale.
 
 on:
   schedule:

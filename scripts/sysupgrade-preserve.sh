@@ -47,8 +47,8 @@
 #     protocol (mDNS / NATS-multicast / similar): on a fresh empty seed,
 #     the firewall advertises itself, the controlplane responds with
 #     state. That removes the need for orchestrator-side preservation
-#     entirely. Tracked in projects/rasputin/backlog.md under the
-#     firewall-image.md section.
+#     entirely. Tracked in the wiki backlog at
+#     projects/rasputin/backlog/design/os-images/firewall-image.md.
 #   - Failures mid-flow can leave the firewall in a halfway state.
 #     The script bails early if preserve fails. After-flash restore
 #     failures leave the firewall with empty /etc/rasputin/ — recoverable
