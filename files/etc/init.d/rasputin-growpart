@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-growpart — grow the /overlay (rootfs_data) partition to fill the disk
+# on first boot, and fix the backup GPT header. One-time, ONLINE (no reboot),
+# idempotent. See /usr/lib/rasputin/rasputin-growpart.sh for the mechanism.
+#
+# START=99: run late, after /overlay is mounted (extroot happens at preinit, long
+# before init scripts). Uses boot() so it only runs during system boot, not on a
+# manual `/etc/init.d/rasputin-growpart start`.
+
+START=99
+
+boot() {
+	# Never let a grow failure block boot — the box must come up regardless.
+	/usr/lib/rasputin/rasputin-growpart.sh || \
+		logger -t rasputin-growpart "grow failed (non-fatal); overlay stays at current size"
+}

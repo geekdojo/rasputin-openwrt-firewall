@@ -73,7 +73,14 @@ dnsmasq-full
 # gives on-device fsck/resize for the overlay. See firewall-image.md §5.1.
 block-mount              # /sbin/block + preinit extroot (reads /etc/config/fstab)
 kmod-fs-ext4             # mount the rootfs_data ext4 overlay
-e2fsprogs                # mkfs.ext4 / e2fsck / resize2fs on-device
+e2fsprogs                # e2fsck / tune2fs on-device
+# First-boot grow of rootfs_data into the disk tail (rasputin-growpart) — the
+# image ships a fixed 512M overlay + the rest unallocated; without this the OTA
+# .rootfs bundle (which downloads into /overlay) would ENOSPC on the first
+# update (the un-grown-partition bug that bit the compute nodes).
+sfdisk                   # rewrite the GPT (extend rootfs_data + fix backup header)
+partx-utils              # partx -u: online (BLKPG) resize of the mounted partition
+resize2fs                # grow the ext4 online after the partition grows
 
 # --- IDS (tap mode via UCI method=pcap, action=alert) ---
 # Locked 2026-06-08: ship snort3 from the OpenWrt 25.12 feed (option (a)
