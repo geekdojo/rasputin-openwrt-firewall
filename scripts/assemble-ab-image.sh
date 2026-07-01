@@ -88,13 +88,20 @@ grub-mkimage \
 	-O x86_64-efi \
 	-p /boot/grub \
 	-o "$INPUT/esp-stage/EFI/BOOT/bootx64.efi" \
-	part_gpt fat squashfs ext2 loadenv test linux echo \
+	part_gpt fat loadenv test linux echo \
 	configfile normal boot serial terminal all_video gzio
-# NOTE: `terminal` is the module; terminal_input/terminal_output are COMMANDS it
-# provides (grub.cfg calls them) — they are NOT separate modules, so do not list
-# them here or grub-mkimage fails with "unknown module". grub.cfg uses no
-# `search` (it roots by PARTLABEL in the kernel cmdline + load_env from $prefix),
-# so search* modules are omitted.
+# Module notes (grub-mkimage fails hard on a missing/unknown module, so this set
+# is deliberate):
+#   - NO squashfs / ext2: GRUB only ever reads the FAT ESP (grub.cfg, grubenv,
+#     /boot/vmlinuz). The kernel — not GRUB — mounts the squashfs rootfs. And
+#     Ubuntu's grub-efi-amd64-bin doesn't even ship squashfs.mod (build failed
+#     here on the first run).
+#   - `terminal` is the module; terminal_input/terminal_output are COMMANDS it
+#     provides (grub.cfg calls them) — not modules, so they're not listed.
+#   - NO `search`: grub.cfg roots by PARTLABEL in the kernel cmdline + load_env
+#     from $prefix, so no cross-partition search is needed.
+#   - part_gpt + fat are load-bearing: GRUB needs them to locate its /boot/grub
+#     prefix on the GPT ESP it booted from.
 echo "assemble-ab: built bootx64.efi with loadenv+test embedded"
 
 # --- 5. stage grub.cfg + initialise grubenv ---------------------------------
