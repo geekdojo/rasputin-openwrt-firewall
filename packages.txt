@@ -62,6 +62,19 @@ dnsmasq-full
 -kmod-drm-i915
 -kmod-acpi-video
 
+# --- A/B update: extroot /overlay onto the shared rootfs_data partition ---
+# The custom A/B disk (image/genimage.cfg) carries a dedicated `rootfs_data`
+# partition that BOTH slots share, so config survives a slot switch (and an
+# update to the inactive slot never touches it). But x86 OpenWrt's `rootdisk`
+# backend does NOT honour a partition label — left to itself it overlays on the
+# root partition's slack (a per-slot loop, proven on the dev.44 QEMU boot). So
+# we force /overlay onto rootfs_data via extroot (files/etc/config/fstab). That
+# needs the block-mount preinit integration + ext4 kernel support; e2fsprogs
+# gives on-device fsck/resize for the overlay. See firewall-image.md §5.1.
+block-mount              # /sbin/block + preinit extroot (reads /etc/config/fstab)
+kmod-fs-ext4             # mount the rootfs_data ext4 overlay
+e2fsprogs                # mkfs.ext4 / e2fsck / resize2fs on-device
+
 # --- IDS (tap mode via UCI method=pcap, action=alert) ---
 # Locked 2026-06-08: ship snort3 from the OpenWrt 25.12 feed (option (a)
 # of the original three-way choice). The Suricata-removed-from-feeds

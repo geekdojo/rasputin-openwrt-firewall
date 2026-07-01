@@ -114,6 +114,17 @@ grub-editenv "$GRUBENV" create
 grub-editenv "$GRUBENV" set ORDER="A B" A_OK=1 A_TRY=0 B_OK=1 B_TRY=0
 echo "assemble-ab: initialised grubenv (ORDER='A B', both slots good)"
 
+# --- 5b. build the shared /overlay ext4 (extroot target) --------------------
+# x86 OpenWrt won't put /overlay on a labelled partition on its own, so we ship
+# a formatted, empty ext4 labelled `rootfs_data` and point extroot at it via
+# files/etc/config/fstab. Both A/B slots mount THIS as /overlay, so config
+# survives a slot switch. fstools layers overlayfs on it + auto-creates
+# upper/work on first boot. mkfs.ext4 (e2fsprogs) is preinstalled on the runner.
+ROOTFS_DATA_MB=512
+dd if=/dev/zero of="$INPUT/rootfs_data.ext4" bs=1M count="$ROOTFS_DATA_MB" status=none
+mkfs.ext4 -q -F -L rootfs_data "$INPUT/rootfs_data.ext4"
+echo "assemble-ab: built empty rootfs_data.ext4 (${ROOTFS_DATA_MB}M, label=rootfs_data)"
+
 # --- 6. assemble the A/B disk with genimage ---------------------------------
 # genimage insists on a --rootpath even though our layout embeds pre-built
 # images only (no rootfs generated from a tree); an empty dir satisfies it.

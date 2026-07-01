@@ -1,0 +1,26 @@
+# Extroot: force /overlay onto the shared `rootfs_data` partition of the A/B
+# disk (image/genimage.cfg), so config survives a slot switch and an update to
+# the inactive slot never touches it. Without this, x86 OpenWrt's rootdisk
+# backend overlays on the ACTIVE root partition's slack (per-slot, not shared —
+# proven on the dev.44 QEMU boot). See firewall-image.md §5.1.
+#
+# The partition is a fresh ext4 labelled `rootfs_data` (made at build time by
+# scripts/assemble-ab-image.sh). block-mount (preinit) reads this file and mounts
+# the label at /overlay before switch_root; fstools then layers overlayfs on it.
+# If the device is missing, preinit falls back to the default slack overlay, so
+# a broken partition degrades rather than bricks.
+
+config global
+	option anon_swap '0'
+	option anon_mount '0'
+	option auto_swap '0'
+	option auto_mount '0'
+	option delay_root '5'
+	option check_fs '0'
+
+config mount
+	option target '/overlay'
+	option label 'rootfs_data'
+	option fstype 'ext4'
+	option options 'rw,noatime'
+	option enabled '1'
