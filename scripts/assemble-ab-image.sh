@@ -47,12 +47,17 @@ echo "assemble-ab: input image $IMG"
 echo "assemble-ab: version    $VERSION"
 
 # --- 1. locate the ESP (p1) and rootfs (p2) in the combined image -----------
-# partx gives start sector + sector count per partition, robustly (no fragile
-# device-name parsing). OpenWrt x86 combined-efi = p1 EFI FAT, p2 squashfs.
-read -r P1_START P1_SECTORS < <(partx -o START,SECTORS -g -r -n 1:1 "$IMG")
-read -r P2_START P2_SECTORS < <(partx -o START,SECTORS -g -r -n 2:2 "$IMG")
-[ -n "${P1_START:-}" ] && [ -n "${P2_START:-}" ] || {
-	echo "assemble-ab: could not find p1/p2 in $IMG" >&2; partx -s "$IMG" >&2; exit 1
+# sfdisk -d dumps the partition table from a plain image file (no loop device),
+# one `... : start=<N>, size=<M>, ...` line per partition, sizes in 512B sectors.
+# OpenWrt x86 combined-efi = p1 EFI FAT, p2 squashfs.
+mapfile -t PARTS < <(sfdisk -d "$IMG" 2>/dev/null | grep -E '^\S+[[:space:]]*:[[:space:]]*start=')
+[ "${#PARTS[@]}" -ge 2 ] || { echo "assemble-ab: expected >=2 partitions in $IMG" >&2; sfdisk -d "$IMG" >&2 || true; exit 1; }
+field() { printf '%s\n' "$1" | sed -n "s/.*$2=[[:space:]]*\([0-9][0-9]*\).*/\1/p"; }
+P1_START=$(field "${PARTS[0]}" start)
+P2_START=$(field "${PARTS[1]}" start)
+P2_SECTORS=$(field "${PARTS[1]}" size)
+[ -n "$P1_START" ] && [ -n "$P2_START" ] && [ -n "$P2_SECTORS" ] || {
+	echo "assemble-ab: could not parse p1/p2 geometry from $IMG" >&2; printf '%s\n' "${PARTS[@]}" >&2; exit 1
 }
 ESP_OFF=$((P1_START * 512))
 echo "assemble-ab: ESP at sector $P1_START (offset $ESP_OFF); rootfs at sector $P2_START ($P2_SECTORS sectors)"
@@ -84,8 +89,12 @@ grub-mkimage \
 	-p /boot/grub \
 	-o "$INPUT/esp-stage/EFI/BOOT/bootx64.efi" \
 	part_gpt fat squashfs ext2 loadenv test linux echo \
-	configfile normal boot search search_label search_fs_uuid \
-	serial terminal terminal_input terminal_output all_video gzio reboot halt
+	configfile normal boot serial terminal all_video gzio
+# NOTE: `terminal` is the module; terminal_input/terminal_output are COMMANDS it
+# provides (grub.cfg calls them) — they are NOT separate modules, so do not list
+# them here or grub-mkimage fails with "unknown module". grub.cfg uses no
+# `search` (it roots by PARTLABEL in the kernel cmdline + load_env from $prefix),
+# so search* modules are omitted.
 echo "assemble-ab: built bootx64.efi with loadenv+test embedded"
 
 # --- 5. stage grub.cfg + initialise grubenv ---------------------------------
