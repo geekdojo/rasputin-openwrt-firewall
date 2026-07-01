@@ -3,11 +3,13 @@ name: release
 # Build + sign + ship the Rasputin firewall (Node N) OpenWrt image.
 #
 # Mirror of rasputin-os's release workflow but adapted for OpenWrt:
-#   - ImageBuilder, not Buildroot (~5-10 min build, not 50 min)
-#   - sysupgrade .img.gz, not RAUC .raucb
-#   - detached CMS .sig signature, verified by rasputin-agent on the
-#     device before invoking sysupgrade (same YubiKey-rooted PKI as
-#     rasputin-os; see os-images/release-pipeline.md §3)
+#   - ImageBuilder (~5-10 min), then a genimage post-process that re-lays-out
+#     its single-rootfs image into our custom A/B disk (scripts/assemble-ab-image.sh).
+#   - Ships TWO signed artifacts: `*-ab.img.gz` (full A/B disk, initial flash)
+#     and `*.rootfs` (bare rootfs squashfs, the OTA artifact the control plane
+#     pushes into the inactive slot — custom A/B, no RAUC, no sysupgrade).
+#   - detached CMS .sig signature, verified by rasputin-agent on the device
+#     (same YubiKey-rooted PKI as rasputin-os; see os-images/release-pipeline.md §3)
 #
 # Triggers:
 #   - push of a CalVer tag (e.g. 2026.07.1 or 2026.07.1-dev.1)
@@ -60,6 +62,9 @@ jobs:
           req="README.md packages.txt agent-version.txt
                scripts/init-imagebuilder.sh
                scripts/fetch-snort-rules.sh
+               scripts/assemble-ab-image.sh
+               image/grub.cfg
+               image/genimage.cfg
                files/etc/init.d/rasputin-agent
                files/etc/uci-defaults/99-rasputin
                files/etc/snort/rasputin-extra.lua
@@ -241,59 +246,43 @@ jobs:
             imagebuilder/dl
           key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
 
-      - name: Patch GRUB cmdline (i915.modeset=0)
+      - name: Assemble A/B image (genimage post-process)
         run: |
           set -euo pipefail
-          # mtools (mcopy/mdir) is the tool we use to read/write FAT EFI
-          # partition contents without losetup/mount. fdisk for finding
-          # the partition offset.
-          sudo apt-get install -y --no-install-recommends mtools fdisk
+          ver="${{ steps.ver.outputs.version }}"
+          # genimage re-lays-out ImageBuilder's single-rootfs image into our A/B
+          # disk (ESP + rootfs-0/1 + rootfs_data). grub2 tools build our own EFI
+          # loader with the loadenv+test modules the boot-counter needs; mtools/
+          # fdisk/util-linux extract kernel+rootfs; genimage assembles.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
-          # Decompress, patch grub.cfg in place, re-compress (overwriting
-          # the original artifact so the stage step picks it up).
-          # OpenWrt's combined-efi .img.gz has trailing NUL padding, so
-          # gunzip returns rc=2 ("trailing garbage ignored") even though
-          # decompression succeeded. Same gotcha the smoke step works
-          # around — tolerate rc=2 here too.
+          # OpenWrt's combined-efi .img.gz has trailing NUL padding, so gunzip
+          # returns rc=2 ("trailing garbage ignored") though it decompressed fine.
           rc=0
           gunzip -k -f "$src" || rc=$?
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-            echo "::error::gunzip failed with rc=$rc on $src"
-            exit "$rc"
+            echo "::error::gunzip failed with rc=$rc on $src"; exit "$rc"
           fi
           img="${src%.gz}"
-          ./scripts/patch-image-cmdline.sh "$img"
-          gzip -f "$img"
+          RASPUTIN_VERSION="$ver" ./scripts/assemble-ab-image.sh "$img" "$ver"
 
       - name: Stage release-shaped names + upload artifact
         run: |
           set -euo pipefail
           mkdir -p staged
           ver="${{ steps.ver.outputs.version }}"
-          # On x86 OpenWrt there is NO separate `sysupgrade` artifact —
-          # the same combined image is used for initial flash (write to
-          # disk) and for `sysupgrade -F` consumption later. ImageBuilder
-          # produces two rootfs flavors:
-          #   - *-squashfs-combined-efi.img.gz → squashfs base + /overlay
-          #     (atomic-ish upgrades, config preserved across sysupgrade).
-          #     This is the canonical firewall format.
-          #   - *-ext4-combined-efi.img.gz     → writable ext4 root (no
-          #     /overlay split). Easier to mess with at the cost of
-          #     non-atomic upgrade semantics. Not what we want.
-          # Pick squashfs+efi explicitly so the choice doesn't depend on
-          # glob ordering.
-          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
-          test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
-          cp "$src" "staged/rasputin-fw-n100-${ver}-combined-efi.img.gz"
-          # ImageBuilder writes a .manifest file in bin/targets/x86/64/
-          # listing every package + version installed in the image. This
-          # IS our SBOM — authoritative, deterministic, OpenWrt-native.
-          # The manifest is shared across rootfs flavors (squashfs/ext4
-          # don't differ in package set), so the filename is just
-          # `openwrt-<ver>-<arch>-<profile>.manifest` — no flavor suffix.
-          # We stage it under the release-shaped name so the canary
-          # workflow can fetch it from the latest stable to diff against.
+          # assemble-ab-image.sh already emits release-shaped names into ab-out/:
+          #   rasputin-fw-n100-<ver>-ab.img.gz         — full A/B disk (initial flash)
+          #   rasputin-fw-n100-<ver>.rootfs            — bare rootfs squashfs (OTA artifact)
+          #   rasputin-fw-n100-<ver>.rootfs.version    — version sidecar
+          cp ab-out/rasputin-fw-n100-"${ver}"-ab.img.gz       staged/
+          cp ab-out/rasputin-fw-n100-"${ver}".rootfs          staged/
+          cp ab-out/rasputin-fw-n100-"${ver}".rootfs.version  staged/
+          # ImageBuilder writes a .manifest (package list) — our SBOM. The canary
+          # workflow fetches it from the latest stable to diff against.
           manifest_src=$(ls imagebuilder/bin/targets/x86/64/*.manifest 2>/dev/null | head -1)
           test -n "$manifest_src" || { echo "::error::ImageBuilder manifest not produced"; exit 1; }
           cp "$manifest_src" "staged/rasputin-fw-n100-${ver}.sbom.txt"
@@ -304,15 +293,18 @@ jobs:
           name: fw-n100-${{ steps.ver.outputs.version }}
           path: |
             staged/*.img.gz
+            staged/*.rootfs
+            staged/*.rootfs.version
             staged/*.sbom.txt
 
   smoke-fw:
     needs: build
-    # Run as long as the workflow wasn't cancelled. Boots the combined-efi
-    # image under QEMU+OVMF and waits for OpenWrt's procd banner / login
-    # prompt — that's enough to confirm the image isn't structurally broken.
-    # It does NOT validate the i226-V driver, line-rate, or NAT — that's
-    # hardware-only.
+    # Run as long as the workflow wasn't cancelled. Boots the A/B disk under
+    # QEMU+OVMF and waits for OpenWrt's procd banner / login prompt — this
+    # exercises our grub-mkimage EFI + the boot-counter grub.cfg + the genimage
+    # GPT layout end-to-end (reaching the banner = slot A booted). It does NOT
+    # validate the i226-V driver, line-rate, NAT, or the /overlay-from-rootfs_data
+    # mount — those are hardware-only.
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     steps:
@@ -326,15 +318,16 @@ jobs:
       - name: Boot headless, wait for OpenWrt banner
         run: |
           set -x
-          # Pick the combined-efi (flashable) variant; sysupgrade isn't
-          # bootable standalone.
-          IMG_GZ=$(ls img/*combined-efi*.img.gz | head -1)
-          test -n "$IMG_GZ" || { echo "no combined-efi .img.gz artifact"; exit 1; }
+          # Boot the A/B disk. This is a strong pre-hardware signal: it exercises
+          # our grub-mkimage EFI loader, the boot-counter grub.cfg (load_env +
+          # slot select), and the genimage GPT layout end-to-end — reaching the
+          # OpenWrt banner means slot A booted from the A/B image. (It does NOT
+          # validate i226-V/NAT/line-rate or the /overlay-from-rootfs_data mount;
+          # those are hardware-only.)
+          IMG_GZ=$(ls img/*-ab.img.gz | head -1)
+          test -n "$IMG_GZ" || { echo "no A/B .img.gz artifact"; exit 1; }
           IMG=${IMG_GZ%.gz}
-          # OpenWrt's combined-efi .img.gz has trailing NUL padding after the
-          # gzip stream (raw-image alignment). gunzip decompresses correctly
-          # but exits 2 ("trailing garbage ignored"). Tolerate exit 2; only
-          # fail on real errors or a missing output file.
+          # Tolerate gunzip exit 2 ("trailing garbage ignored") as elsewhere.
           gunzip -kf "$IMG_GZ" || rc=$?
           if [ "${rc:-0}" -ne 0 ] && [ "${rc:-0}" -ne 2 ]; then
             echo "::error::gunzip failed with rc=${rc}"; exit "${rc}"
@@ -441,52 +434,65 @@ jobs:
           # this from the most recent stable release to diff against
           # the current build's manifest.
           cp artifacts/*.sbom.txt release-out/ 2>/dev/null || true
-          : > /tmp/manifest-artifacts.jsonl
+          cp artifacts/*.rootfs.version release-out/ 2>/dev/null || true
           ver="${{ steps.ver.outputs.version }}"
-          for img in artifacts/*.img.gz; do
-            [ -f "$img" ] || continue
-            name=$(basename "$img")
-            cp "$img" "release-out/$name"
-            sig="release-out/${name}.sig"
-            # Detached CMS signature, DER format. The rasputin-agent on
-            # the device verifies with:
-            #   openssl cms -verify -binary -inform DER \
-            #     -in <sig> -content <img.gz> \
-            #     -CAfile /etc/rasputin/trust/root-ca.pem
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # Detached CMS signature, DER format. The rasputin-agent verifies with:
+          #   openssl cms -verify -binary -inform DER -in <sig> -content <file> \
+          #     -CAfile /etc/rasputin/trust/root-ca.pem
+          sign_file() {
+            f="$1"
             openssl cms -sign -binary \
-              -in "release-out/$name" \
-              -signer  /mnt/rasputin-sign/leaf.pem \
+              -in "release-out/$f" \
+              -signer   /mnt/rasputin-sign/leaf.pem \
               -certfile /mnt/rasputin-sign/intermediate.pem \
-              -inkey   /mnt/rasputin-sign/leaf.key \
+              -inkey    /mnt/rasputin-sign/leaf.key \
               -outform DER \
-              -out "$sig"
+              -out "release-out/${f}.sig"
+          }
 
-            sha=$(sha256sum "release-out/$name" | awk '{print $1}')
-            sigsha=$(sha256sum "$sig"            | awk '{print $1}')
-            sz=$(stat -c%s "release-out/$name")
-            sigsz=$(stat -c%s "$sig")
-            kind=$(echo "$name" | grep -oE 'combined-efi|sysupgrade')
-            built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # The firewall A/B release carries TWO signed artifacts under ONE
+          # manifest entry (compatible=rasputin-fw-n100):
+          #   image  = the full A/B disk (-ab.img.gz)  — INITIAL FLASH
+          #   rootfs = the bare rootfs squashfs (.rootfs) — the OTA artifact the
+          #            agent OpenWrtABBackend dd's into the inactive slot.
+          # `image`/`sha256` stay on the disk so the existing update-Check keeps
+          # working; the `rootfs*` fields are what the deploy path consumes once
+          # the release-registry `fw` component is flipped to deployable.
+          disk=$(cd artifacts && ls rasputin-fw-n100-*-ab.img.gz | head -1)
+          rootfs=$(cd artifacts && ls rasputin-fw-n100-*.rootfs | head -1)
+          test -n "$disk"   || { echo "::error::no -ab.img.gz artifact to sign"; exit 1; }
+          test -n "$rootfs" || { echo "::error::no .rootfs artifact to sign"; exit 1; }
+          cp "artifacts/$disk"   "release-out/$disk"
+          cp "artifacts/$rootfs" "release-out/$rootfs"
+          sign_file "$disk"
+          sign_file "$rootfs"
 
-            jq -nc \
-              --arg sku fw-n100 --arg arch amd64 \
-              --arg compatible rasputin-fw-n100 \
-              --arg kind "$kind" \
-              --arg image "$name"            --arg sha "$sha"    --argjson sz "$sz" \
-              --arg sig   "$(basename "$sig")" --arg sigsha "$sigsha" --argjson sigsz "$sigsz" \
-              --arg signedBy "Rasputin Release ${ver}" --arg built "$built" \
-              '{sku:$sku, architecture:$arch, compatible:$compatible, kind:$kind,
-                image:$image, sha256:$sha, sizeBytes:$sz,
-                sig:$sig, sigSha256:$sigsha, sigSizeBytes:$sigsz,
-                signedBy:$signedBy, buildDate:$built}' \
-              >> /tmp/manifest-artifacts.jsonl
-          done
+          dsha=$(sha256sum "release-out/$disk"   | awk '{print $1}')
+          dsz=$(stat -c%s   "release-out/$disk")
+          dsigsha=$(sha256sum "release-out/${disk}.sig" | awk '{print $1}')
+          dsigsz=$(stat -c%s   "release-out/${disk}.sig")
+          rsha=$(sha256sum "release-out/$rootfs" | awk '{print $1}')
+          rsz=$(stat -c%s   "release-out/$rootfs")
+          rsigsha=$(sha256sum "release-out/${rootfs}.sig" | awk '{print $1}')
+          rsigsz=$(stat -c%s   "release-out/${rootfs}.sig")
 
           jq -n \
-            --arg version "${{ steps.ver.outputs.version }}" \
-            --arg channel "${{ steps.ver.outputs.channel }}" \
-            --slurpfile artifacts /tmp/manifest-artifacts.jsonl \
-            '{version:$version, channel:$channel, artifacts:$artifacts}' \
+            --arg version "$ver" --arg channel "${{ steps.ver.outputs.channel }}" \
+            --arg sku fw-n100 --arg arch amd64 --arg compatible rasputin-fw-n100 \
+            --arg image "$disk"   --arg isha "$dsha" --argjson isz "$dsz" \
+            --arg isig "${disk}.sig"   --arg isigsha "$dsigsha" --argjson isigsz "$dsigsz" \
+            --arg rootfs "$rootfs" --arg rsha "$rsha" --argjson rsz "$rsz" \
+            --arg rsig "${rootfs}.sig" --arg rsigsha "$rsigsha" --argjson rsigsz "$rsigsz" \
+            --arg signedBy "Rasputin Release ${ver}" --arg built "$built" \
+            '{version:$version, channel:$channel, artifacts:[{
+               sku:$sku, architecture:$arch, compatible:$compatible, kind:"ab",
+               image:$image, sha256:$isha, sizeBytes:$isz,
+               sig:$isig, sigSha256:$isigsha, sigSizeBytes:$isigsz,
+               rootfs:$rootfs, rootfsSha256:$rsha, rootfsSizeBytes:$rsz,
+               rootfsSig:$rsig, rootfsSigSha256:$rsigsha, rootfsSigSizeBytes:$rsigsz,
+               signedBy:$signedBy, buildDate:$built}]}' \
             > release-out/manifest.json
 
           echo "----- release-out/ -----" && ls -lh release-out/
@@ -507,7 +513,7 @@ jobs:
           fi
           gh release create "${{ steps.ver.outputs.version }}" \
             --title "Rasputin Firewall ${{ steps.ver.outputs.version }}" \
-            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Verify each image's signature with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <image>.img.gz.sig -content <image>.img.gz -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
+            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
             $PRERELEASE_FLAG \
             release-out/*
 
