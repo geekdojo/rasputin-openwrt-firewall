@@ -29,4 +29,11 @@
 #                        hostsdir so tailscaled resolves the mesh login server.
 #   v0.8.5 (2026-06-18): hostsync reloads dnsmasq after writing (addn-hosts isn't
 #                        auto-watched — needed on a clean boot / CP-IP change).
-0.8.5
+#   2026.07.1-dev.34 (2026-07-01): version scheme migrates semver → CalVer (the
+#                        control plane migrated; agent releases are now CalVer,
+#                        tag v<CalVer>). Brings the firewall A/B update stack:
+#                        OpenWrtABBackend + grubenv codec (custom A/B, no RAUC),
+#                        boot-time mark-good (resets the GRUB boot-counter), and
+#                        the role-aware diag.health probe (data-plane commit gate).
+#                        REQUIRED for the firewall to perform + survive an A/B OTA.
+2026.07.1-dev.34
