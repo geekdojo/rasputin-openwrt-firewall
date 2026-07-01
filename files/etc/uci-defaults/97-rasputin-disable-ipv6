@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# 97-rasputin-disable-ipv6 — first-boot removal of IPv6 from the firewall's
+# network config (Decision #9: Rasputin is IPv4-only). Runs before 99-rasputin;
+# uci-defaults execute in sorted order, then self-delete.
+#
+# What this fixes: the stock OpenWrt config ships a `wan6` DHCPv6 interface + a
+# LAN ULA + RA/DHCPv6 service, so the box logs `odhcp6c … Failed to send SOLICIT
+# … Address not available` on the WAN and hands out IPv6 on the LAN. Neither is
+# wanted. The kernel-level disable is baked at /etc/sysctl.d/99-rasputin-no-ipv6.conf;
+# this strips the UCI config so odhcp6c never starts and the LAN advertises no v6.
+#
+# Idempotent + defensive: every delete is `-q` so a missing option is fine.
+
+set -eu
+
+uci -q batch <<'EOF'
+delete network.wan6
+delete network.globals.ula_prefix
+set dhcp.lan.dhcpv6='disabled'
+set dhcp.lan.ra='disabled'
+delete dhcp.lan.ra_slaac
+delete dhcp.lan.ra_flags
+delete dhcp.lan.ndp
+commit network
+commit dhcp
+EOF
+
+logger -t rasputin "IPv6 disabled: removed wan6 + LAN ULA/RA (Decision #9, IPv4-only)"
+exit 0
