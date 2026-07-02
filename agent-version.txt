@@ -36,4 +36,9 @@
 #                        boot-time mark-good (resets the GRUB boot-counter), and
 #                        the role-aware diag.health probe (data-plane commit gate).
 #                        REQUIRED for the firewall to perform + survive an A/B OTA.
-2026.07.1-dev.34
+#   2026.07.1-dev.35 (2026-07-02): bench fix — openwrt-ab now mounts the ESP on
+#                        demand for grubenv (OpenWrt doesn't mount it at runtime)
+#                        and resolves the inactive slot via `block info` (no udev
+#                        by-partlabel / findfs on OpenWrt). Without this the first
+#                        A/B OTA failed at the slot-flip. Caught pre-flight on dev.49.
+2026.07.1-dev.35
