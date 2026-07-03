@@ -36,6 +36,10 @@ jobs:
           path-to-signatures: 'signatures/version1/cla.json'
           path-to-document: 'https://github.com/geekdojo/rasputin-openwrt-firewall/blob/main/CLA.md'
           branch: 'main'
-          allowlist: BryceAshey,bot*
+          # `claude` is allowlisted solely because the AI_DISCLOSURE.md
+          # Co-Authored-By trailer (noreply@anthropic.com) resolves to that
+          # GitHub login and the action treats co-authors as committers; the
+          # human contributor on a PR still has to sign.
+          allowlist: BryceAshey,claude,bot*
           remote-organization-name: geekdojo
           remote-repository-name: cla-signatures
