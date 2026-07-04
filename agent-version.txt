@@ -41,4 +41,9 @@
 #                        and resolves the inactive slot via `block info` (no udev
 #                        by-partlabel / findfs on OpenWrt). Without this the first
 #                        A/B OTA failed at the slot-flip. Caught pre-flight on dev.49.
-2026.07.1-dev.35
+#   2026.07.1-dev.36 (2026-07-04): deployment-mode idle/active — `firewall.set_active`
+#                        handler toggles LAN DHCP (dhcp.lan.ignore) + snort per the
+#                        deployment mode; LAN-peer idles the box (DHCP off) so it
+#                        can't clash with the operator's existing router. Required
+#                        for the setup-wizard deployment-mode enforcement.
+2026.07.1-dev.36
