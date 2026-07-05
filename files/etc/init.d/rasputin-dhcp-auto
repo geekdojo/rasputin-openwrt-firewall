@@ -1,0 +1,48 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-dhcp-auto — conflict-aware LAN DHCP for the Rasputin deployment modes.
+#
+# Runs once per boot, BEFORE dnsmasq (START 55 < dnsmasq's 60), so dnsmasq comes
+# up with the right dhcp.lan.ignore already set and never needs a reload — and,
+# crucially, our own DHCP server isn't running yet, so the probe below can't
+# detect itself.
+#
+# Decides whether THIS box hands out DHCP on the LAN:
+#   - No other DHCP server answering on br-lan → serve it (ignore=0). This is the
+#     "Rasputin is my router" (Mode A) / learning sub-segment (Mode C) case:
+#     nothing upstream hands out addresses, so the controlplane + the operator's
+#     laptop depend on us for an IP to even reach the setup wizard. DHCP MUST be
+#     on here or the whole cluster is unreachable — the first-boot bootstrap.
+#   - Another DHCP server already answering → back off (ignore=1). This is the
+#     "plug into my existing LAN" (Mode B) case: the existing router owns DHCP;
+#     serving it too would start a DHCP war on the operator's LAN.
+#
+# This is only the BOOT-TIME default, chosen locally so first boot is safe
+# before any mode is known. Once the controlplane knows the chosen mode it sends
+# firewall.set_active, which the agent applies authoritatively (and the reconcile
+# loop re-asserts) — an explicit mode always wins over this local guess.
+#
+# Detection: a short udhcpc DISCOVER on br-lan with a no-op handler script, so an
+# OFFER is observed via udhcpc's exit status without ever reconfiguring the
+# interface (udhcpc exits 0 = a server answered, non-zero = nobody did).
+START=55
+
+boot() {
+	local iface="br-lan"
+
+	if udhcpc -i "$iface" -n -q -f -t 3 -T 2 \
+		-s /usr/lib/rasputin/dhcp-detect.sh >/dev/null 2>&1; then
+		logger -t rasputin "dhcp-auto: another DHCP server answered on $iface — LAN DHCP OFF (deferring to it)"
+		uci -q set dhcp.lan.ignore='1'
+	else
+		logger -t rasputin "dhcp-auto: no other DHCP server on $iface — serving LAN DHCP"
+		uci -q set dhcp.lan.ignore='0'
+	fi
+	uci -q commit dhcp
+}
+
+# A manual `start` (not at boot) does the same probe — handy for re-evaluating
+# after a rewire without a reboot.
+start() {
+	boot
+}

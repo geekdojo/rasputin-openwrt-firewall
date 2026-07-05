@@ -161,6 +161,11 @@ mkdir -p /etc/rasputin/mesh /etc/tailscale
 /etc/init.d/rasputin-agent enable
 /etc/init.d/snort enable
 /etc/init.d/tailscale enable
+# Conflict-aware LAN DHCP: decide (each boot, before dnsmasq) whether to serve
+# DHCP based on whether another server is already present. Serves it when we're
+# the router (Mode A/C bootstrap — the cluster needs addresses to reach the
+# wizard); backs off when an existing router owns DHCP (Mode B). See the script.
+/etc/init.d/rasputin-dhcp-auto enable
 
 logger -t rasputin "99-rasputin: provisioning complete"
 exit 0
