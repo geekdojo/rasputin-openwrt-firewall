@@ -25,20 +25,34 @@
 # Detection: a short udhcpc DISCOVER on br-lan with a no-op handler script, so an
 # OFFER is observed via udhcpc's exit status without ever reconfiguring the
 # interface (udhcpc exits 0 = a server answered, non-zero = nobody did).
-START=55
+#
+# START is AFTER dnsmasq (60) on purpose: we can't rely on init ordering to keep
+# our own DHCP server from answering the probe (it doesn't — bench 2026-07-05
+# saw dnsmasq up 9s before an S55 probe), so instead we explicitly SILENCE our
+# own DHCP (ignore=1 + reload) before probing, then re-enable it only if nobody
+# else answered. That makes the result correct regardless of start order.
+START=65
 
 boot() {
 	local iface="br-lan"
 
+	# Silence our own LAN DHCP first so the probe can't self-detect. A reload
+	# with ignore=1 keeps DNS up but stops DHCP answers on the LAN.
+	uci -q set dhcp.lan.ignore='1'
+	uci -q commit dhcp
+	/etc/init.d/dnsmasq reload 2>/dev/null
+	sleep 1
+
 	if udhcpc -i "$iface" -n -q -f -t 3 -T 2 \
 		-s /usr/lib/rasputin/dhcp-detect.sh >/dev/null 2>&1; then
-		logger -t rasputin "dhcp-auto: another DHCP server answered on $iface — LAN DHCP OFF (deferring to it)"
-		uci -q set dhcp.lan.ignore='1'
+		logger -t rasputin "dhcp-auto: another DHCP server answered on $iface — LAN DHCP stays OFF (deferring to it)"
+		# ignore already 1; dnsmasq already reloaded with DHCP off.
 	else
 		logger -t rasputin "dhcp-auto: no other DHCP server on $iface — serving LAN DHCP"
 		uci -q set dhcp.lan.ignore='0'
+		uci -q commit dhcp
+		/etc/init.d/dnsmasq reload 2>/dev/null
 	fi
-	uci -q commit dhcp
 }
 
 # A manual `start` (not at boot) does the same probe — handy for re-evaluating
