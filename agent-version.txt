@@ -4,7 +4,7 @@
 # read this file, so the pin can NEVER drift between them. To bump the agent:
 # edit the bare version line at the bottom (and add a changelog entry).
 #
-# The agent is downloaded as a pre-built amd64 tarball from the PRIVATE
+# The agent is downloaded as a pre-built amd64 tarball from the
 # geekdojo/rasputin-control-plane release `v<this>` (static CGO_ENABLED=0 Go,
 # runs on OpenWrt musl). The version must ALREADY be published there before a
 # firewall build that pins it — the build downloads it by URL.
@@ -46,4 +46,8 @@
 #                        deployment mode; LAN-peer idles the box (DHCP off) so it
 #                        can't clash with the operator's existing router. Required
 #                        for the setup-wizard deployment-mode enforcement.
-2026.07.1-dev.36
+#   2026.07.1 (2026-07-09): first stable CalVer release — seed-supplied SSH
+#                        authorized keys (no vendor key baked, pipeline cannot
+#                        inject one) + Add-node wizard seed field. Lockstep
+#                        stable across control-plane / os / firewall.
+2026.07.1
