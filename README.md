@@ -1,10 +1,24 @@
 # rasputin-openwrt-firewall
 
-OpenWrt-based firewall image for the Rasputin **Node N** (Intel N100 + dual
-2.5GbE Intel i226-V). One repo, one SKU (`rasputin-fw-n100`): OpenWrt
-**ImageBuilder** produces the rootfs (minutes, not hours), and a genimage
-post-process re-lays it out into an **A/B disk** with the same
-GRUB-boot-counter rollback contract as the compute nodes.
+[![Release](https://github.com/geekdojo/rasputin-openwrt-firewall/actions/workflows/release.yml/badge.svg)](https://github.com/geekdojo/rasputin-openwrt-firewall/actions/workflows/release.yml)
+[![Latest](https://img.shields.io/github/v/release/geekdojo/rasputin-openwrt-firewall?include_prereleases&label=release)](https://github.com/geekdojo/rasputin-openwrt-firewall/releases)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-E8590C.svg)](LICENSE)
+
+The firewall of **Rasputin** — an open-source homelab cluster system: a small
+fleet of nodes (Raspberry Pi or Intel N100) plus a dedicated firewall node,
+managed from one web UI, with atomic A/B OS updates that roll back on
+failure. Opinionated where you want guidance, open where you want control,
+and built to work in the first hour.
+
+> **Want to run Rasputin, not build it?** Flashable images and a four-step
+> quickstart live in
+> [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases).
+
+This repo builds the OpenWrt-based firewall image for the Rasputin **Node N**
+(Intel N100 + dual 2.5GbE Intel i226-V). One repo, one SKU
+(`rasputin-fw-n100`): OpenWrt **ImageBuilder** produces the rootfs (minutes,
+not hours), and a genimage post-process re-lays it out into an **A/B disk**
+with the same GRUB-boot-counter rollback contract as the compute nodes.
 
 > **Status: pre-alpha.** Rasputin is in its commodity-hardware proof phase.
 > Image layout, update artifacts, and provisioning formats change without
