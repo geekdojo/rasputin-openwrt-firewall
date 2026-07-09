@@ -69,8 +69,9 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   via `RASPUTIN_SSH_AUTHORIZED_KEY` in `seed.env` (apply-seed writes it to
   `/etc/dropbear/authorized_keys`); with no key, LuCI and the local console
   remain. Our own bench firewalls are provisioned exactly the same way.
-  Releases published before 2026-07-09 baked a disclosed geekdojo support
-  key (see
+  Published releases up to and including `2026.07.1-dev.55` baked a
+  disclosed geekdojo support key — the first no-vendor-key firewall release
+  is anything newer (see
   [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases)).
 - **IPv6 is disabled by design** — the whole Rasputin stack is IPv4-only for
   now.
