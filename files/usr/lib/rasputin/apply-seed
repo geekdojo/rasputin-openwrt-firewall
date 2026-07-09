@@ -33,13 +33,13 @@ fi
 
 # Seed-supplied SSH authorized key → /etc/dropbear/authorized_keys (the path
 # OpenWrt's dropbear reads natively; the overlay is writable, unlike the
-# Buildroot OS where the equivalent lands on the persistent partition).
-# Append-if-missing: the file may already carry a build-baked key (release.yml
-# injects RASPUTIN_SSH_AUTHORIZED_KEY at image build — bench builds; public
-# images drop it pre-GA) and is operator-owned — manual additions survive,
-# revocation is a manual edit. dropbear reads the file per auth attempt, so
-# no service restart is needed. Public key, not a secret — never let a merge
-# hiccup fail the seed apply (all call sites tolerate this block no-oping).
+# Buildroot OS where the equivalent lands on the persistent partition). This
+# is the ONLY way a key gets on the box — images bake none (pre-GA vendor-key
+# removal, 2026-07-09). Append-if-missing: the file is operator-owned —
+# manual additions survive, revocation is a manual edit. dropbear reads the
+# file per auth attempt, so no service restart is needed. Public key, not a
+# secret — never let a merge hiccup fail the seed apply (all call sites
+# tolerate this block no-oping).
 if [ -n "${RASPUTIN_SSH_AUTHORIZED_KEY:-}" ]; then
 	mkdir -p /etc/dropbear
 	touch /etc/dropbear/authorized_keys
@@ -53,15 +53,14 @@ if [ -n "${RASPUTIN_SSH_AUTHORIZED_KEY:-}" ]; then
 	fi
 fi
 
-# Harden to key-only SSH the moment ANY authorized key exists.
-# 96-rasputin-dropbear-harden covers the build-baked-key case, but it runs
-# BEFORE this script (96 < 99) and self-deletes — so a seed-supplied key
-# (first boot, an operator re-run, or a later bootstrap_firewall push) must
-# trigger the same hardening here, or an image with no build key would keep
-# passwordless root on the LAN forever. Key-only is the product posture, so
-# this deliberately re-asserts it on every run once a key is present.
-# dropbear reads PasswordAuth from UCI at start; reload picks it up on a
-# running box and is a harmless no-op pre-procd on first boot.
+# Re-assert key-only SSH whenever an authorized key exists.
+# 96-rasputin-dropbear-harden already disables password auth unconditionally
+# at first boot (and self-deletes); this block is defense-in-depth for the
+# life of the install — key-only is the product posture, so any later
+# apply-seed run (operator re-run, bootstrap_firewall push) puts it back
+# even if someone flipped it. dropbear reads PasswordAuth from UCI at start;
+# reload picks it up on a running box and is a harmless no-op pre-procd on
+# first boot.
 if [ -s /etc/dropbear/authorized_keys ]; then
 	if [ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" != "off" ]; then
 		uci -q batch <<'EOF'

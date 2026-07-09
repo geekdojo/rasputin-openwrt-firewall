@@ -63,15 +63,15 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   ship detection-only rather than pretend otherwise.
 - **Declarative config from the control plane.** The agent applies intent
   (port forwards, rules, VPN peers) via ubus/UCI, reports a state hash, and
-  out-of-band edits are detected — not clobbered. SSH (key-only; no
-  authorized key = password auth stays off the menu for production images)
-  and LuCI remain first-class escape hatches. Supply your own key via
-  `RASPUTIN_SSH_AUTHORIZED_KEY` in `seed.env` (apply-seed writes it to
-  `/etc/dropbear/authorized_keys`). As on the compute image, **CI release
-  images currently still bake a geekdojo support key** (disclosed in
-  [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases));
-  dropping the vendor key from public images is a tracked pre-GA
-  requirement.
+  out-of-band edits are detected — not clobbered. SSH is **key-only from
+  first boot** (password auth is disabled unconditionally) and **the image
+  bakes no SSH key — the build pipeline cannot inject one**. Supply your own
+  via `RASPUTIN_SSH_AUTHORIZED_KEY` in `seed.env` (apply-seed writes it to
+  `/etc/dropbear/authorized_keys`); with no key, LuCI and the local console
+  remain. Our own bench firewalls are provisioned exactly the same way.
+  Releases published before 2026-07-09 baked a disclosed geekdojo support
+  key (see
+  [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases)).
 - **IPv6 is disabled by design** — the whole Rasputin stack is IPv4-only for
   now.
 

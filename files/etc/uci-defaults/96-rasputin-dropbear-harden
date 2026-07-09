@@ -6,34 +6,27 @@
 # delete). Stock OpenWrt ships root with an EMPTY password and dropbear
 # accepting password auth on the LAN — unacceptable for the security node.
 #
-# If a baked authorized_keys is present (injected at build from the
-# RASPUTIN_SSH_AUTHORIZED_KEY org variable), switch SSH to key-only: disable
-# password auth entirely, so there is no LAN-reachable passwordless root and no
-# passwordless window. If no key was baked (a dev image), leave password auth on
-# but warn loudly — disabling it without a key would lock the box out.
-#
-# SEED-SUPPLIED keys arrive later than this script (99-rasputin → apply-seed,
-# possibly much later via a bootstrap_firewall push), so apply-seed re-asserts
-# this same hardening whenever authorized_keys is non-empty. This script only
-# wins the race for build-baked keys — earliest possible, before any service
-# is up.
+# UNCONDITIONAL since the pre-GA vendor-key removal (2026-07-09): images bake
+# no authorized key (the old build-time inject is gone), so the previous
+# "harden only when a key was baked" gate would have left every public image
+# with passwordless root on the LAN. Now the network vector is key-only from
+# the very first boot, period — matching the rasputin-os posture (`dropbear
+# -s`). The operator's key arrives via RASPUTIN_SSH_AUTHORIZED_KEY in
+# seed.env (apply-seed, which also re-asserts this hardening on every run);
+# with no key there is simply no network shell — LuCI and the local console
+# remain, and seed.env can be edited by mounting the disk. No lockout, no
+# passwordless window.
 #
 # Scope: this hardens the NETWORK vector (dropbear). Console/serial root stays
 # as-is (physical access); a console password is a separate follow-up.
 
 set -eu
 
-KEYS=/etc/dropbear/authorized_keys
-
-if [ -s "$KEYS" ]; then
-	uci -q batch <<'EOF'
+uci -q batch <<'EOF'
 set dropbear.@dropbear[0].PasswordAuth='off'
 set dropbear.@dropbear[0].RootPasswordAuth='off'
 commit dropbear
 EOF
-	logger -t rasputin "dropbear hardened: key-only SSH (password auth disabled)"
-else
-	logger -t rasputin "WARNING: no baked SSH key (RASPUTIN_SSH_AUTHORIZED_KEY unset) — dropbear password auth left ON; this image has passwordless root. DEV ONLY."
-fi
+logger -t rasputin "dropbear hardened: key-only SSH (password auth disabled; supply a key via seed.env RASPUTIN_SSH_AUTHORIZED_KEY)"
 
 exit 0
