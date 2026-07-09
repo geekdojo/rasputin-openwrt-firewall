@@ -63,12 +63,14 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   ship detection-only rather than pretend otherwise.
 - **Declarative config from the control plane.** The agent applies intent
   (port forwards, rules, VPN peers) via ubus/UCI, reports a state hash, and
-  out-of-band edits are detected — not clobbered. SSH (key-only; no baked
-  key = password auth stays off the menu for production images) and LuCI
-  remain first-class escape hatches. As on the compute image, **CI release
-  images currently bake a geekdojo support key** (disclosed in
+  out-of-band edits are detected — not clobbered. SSH (key-only; no
+  authorized key = password auth stays off the menu for production images)
+  and LuCI remain first-class escape hatches. Supply your own key via
+  `RASPUTIN_SSH_AUTHORIZED_KEY` in `seed.env` (apply-seed writes it to
+  `/etc/dropbear/authorized_keys`). As on the compute image, **CI release
+  images currently still bake a geekdojo support key** (disclosed in
   [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases));
-  seed-supplied user keys with no vendor key are a tracked pre-GA
+  dropping the vendor key from public images is a tracked pre-GA
   requirement.
 - **IPv6 is disabled by design** — the whole Rasputin stack is IPv4-only for
   now.
@@ -143,6 +145,7 @@ boot):
 RASPUTIN_NODE_ROLE=firewall
 RASPUTIN_NATS_URL=nats://rasputin.local:4222
 RASPUTIN_CP_JOIN_TOKEN=...            # minted by the controlplane
+RASPUTIN_SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop"  # optional; quote it — your SSH key
 ```
 
 On first boot the uci-defaults one-shot assigns WAN/LAN ports (eth1 = WAN,

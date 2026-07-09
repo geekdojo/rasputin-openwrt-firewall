@@ -12,6 +12,12 @@
 # passwordless window. If no key was baked (a dev image), leave password auth on
 # but warn loudly — disabling it without a key would lock the box out.
 #
+# SEED-SUPPLIED keys arrive later than this script (99-rasputin → apply-seed,
+# possibly much later via a bootstrap_firewall push), so apply-seed re-asserts
+# this same hardening whenever authorized_keys is non-empty. This script only
+# wins the race for build-baked keys — earliest possible, before any service
+# is up.
+#
 # Scope: this hardens the NETWORK vector (dropbear). Console/serial root stays
 # as-is (physical access); a console password is a separate follow-up.
 

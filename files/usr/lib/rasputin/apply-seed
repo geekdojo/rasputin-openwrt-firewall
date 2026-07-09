@@ -21,6 +21,7 @@ RASPUTIN_NODE_ROLE=firewall
 RASPUTIN_NODE_ID=
 RASPUTIN_NATS_URL=
 RASPUTIN_CP_JOIN_TOKEN=
+RASPUTIN_SSH_AUTHORIZED_KEY=
 
 if [ -f "$SEED" ]; then
 	# shellcheck disable=SC1090
@@ -28,6 +29,49 @@ if [ -f "$SEED" ]; then
 	logger -t rasputin "apply-seed: loaded seed from $SEED"
 else
 	logger -t rasputin "apply-seed: $SEED not found; writing blank config (agent polls)"
+fi
+
+# Seed-supplied SSH authorized key → /etc/dropbear/authorized_keys (the path
+# OpenWrt's dropbear reads natively; the overlay is writable, unlike the
+# Buildroot OS where the equivalent lands on the persistent partition).
+# Append-if-missing: the file may already carry a build-baked key (release.yml
+# injects RASPUTIN_SSH_AUTHORIZED_KEY at image build — bench builds; public
+# images drop it pre-GA) and is operator-owned — manual additions survive,
+# revocation is a manual edit. dropbear reads the file per auth attempt, so
+# no service restart is needed. Public key, not a secret — never let a merge
+# hiccup fail the seed apply (all call sites tolerate this block no-oping).
+if [ -n "${RASPUTIN_SSH_AUTHORIZED_KEY:-}" ]; then
+	mkdir -p /etc/dropbear
+	touch /etc/dropbear/authorized_keys
+	chmod 600 /etc/dropbear/authorized_keys
+	if grep -qxF -- "$RASPUTIN_SSH_AUTHORIZED_KEY" /etc/dropbear/authorized_keys; then
+		logger -t rasputin "apply-seed: seed SSH key already in /etc/dropbear/authorized_keys"
+	else
+		printf '%s\n' "$RASPUTIN_SSH_AUTHORIZED_KEY" >> /etc/dropbear/authorized_keys \
+			&& logger -t rasputin "apply-seed: appended seed SSH key to /etc/dropbear/authorized_keys" \
+			|| logger -t rasputin "apply-seed: WARNING — failed to write seed SSH key (continuing)"
+	fi
+fi
+
+# Harden to key-only SSH the moment ANY authorized key exists.
+# 96-rasputin-dropbear-harden covers the build-baked-key case, but it runs
+# BEFORE this script (96 < 99) and self-deletes — so a seed-supplied key
+# (first boot, an operator re-run, or a later bootstrap_firewall push) must
+# trigger the same hardening here, or an image with no build key would keep
+# passwordless root on the LAN forever. Key-only is the product posture, so
+# this deliberately re-asserts it on every run once a key is present.
+# dropbear reads PasswordAuth from UCI at start; reload picks it up on a
+# running box and is a harmless no-op pre-procd on first boot.
+if [ -s /etc/dropbear/authorized_keys ]; then
+	if [ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" != "off" ]; then
+		uci -q batch <<'EOF'
+set dropbear.@dropbear[0].PasswordAuth='off'
+set dropbear.@dropbear[0].RootPasswordAuth='off'
+commit dropbear
+EOF
+		/etc/init.d/dropbear reload 2>/dev/null || true
+		logger -t rasputin "apply-seed: dropbear hardened to key-only SSH (authorized key present)"
+	fi
 fi
 
 # Pick a stable per-box node_id. DMI fields are the right thing IF the

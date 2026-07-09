@@ -175,6 +175,11 @@ jobs:
       # password auth when this file is non-empty) — no LAN-reachable passwordless
       # root. Empty variable → empty file → harden script leaves password auth on
       # and warns (dev image, avoids a lockout). Mirrors the trust-root pattern.
+      # Operators can also supply their own key via RASPUTIN_SSH_AUTHORIZED_KEY
+      # in seed.env (apply-seed writes it + re-asserts the key-only hardening).
+      # PRE-GA: unset/blank the variable for public release builds so no vendor
+      # key ships (backlog: firewall-image "seed-supplied SSH authorized key")
+      # — that flip is deliberate, not a drive-by.
       - name: Inject SSH authorized key (key-only SSH)
         env:
           SSH_KEY: ${{ vars.RASPUTIN_SSH_AUTHORIZED_KEY }}
