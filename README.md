@@ -65,7 +65,11 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   (port forwards, rules, VPN peers) via ubus/UCI, reports a state hash, and
   out-of-band edits are detected — not clobbered. SSH (key-only; no baked
   key = password auth stays off the menu for production images) and LuCI
-  remain first-class escape hatches.
+  remain first-class escape hatches. As on the compute image, **CI release
+  images currently bake a geekdojo support key** (disclosed in
+  [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases));
+  seed-supplied user keys with no vendor key are a tracked pre-GA
+  requirement.
 - **IPv6 is disabled by design** — the whole Rasputin stack is IPv4-only for
   now.
 
