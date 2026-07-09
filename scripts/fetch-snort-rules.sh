@@ -38,7 +38,7 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # structure confirmed unchanged, while unblocking the first A/B build).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="fbd18ad80212dda862b85841a07dbec4a1da94af2ddf666ece8a2baf88bfcacd"
+PINNED_SHA="9a74c0ef67a33d9d410ac1723e981b0ddd224b6c0a21f1c22af7fab325b8056b"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
