@@ -138,8 +138,16 @@ gunzip -k imagebuilder/bin/targets/x86/64/openwrt-*-rasputin-*-combined-efi.img.
 
 ## Provisioning a flashed node
 
-Edit `/etc/rasputin/seed.env` on the device (or pre-seed it before first
-boot):
+**Fresh flash (no credentials on the box yet):** after writing the image,
+the disk's first partition is a small FAT volume labeled `RASPUTIN-FW` —
+mount it on your laptop and drop the enrollment file (`seed.env` or
+`rasputin-seed.env`) at its root, then boot. First boot stages it to
+`/etc/rasputin/seed.env` and applies it. This is the only way onto a fresh
+box over the network: the image ships with no SSH key and password auth
+disabled, so there is nothing to scp *to* until the seed lands your key.
+
+**Already-running box** (previously seeded with your key): edit
+`/etc/rasputin/seed.env` over SSH, or push a new one with `scp -O`.
 
 ```sh
 RASPUTIN_NODE_ROLE=firewall
@@ -148,12 +156,12 @@ RASPUTIN_CP_JOIN_TOKEN=...            # minted by the controlplane
 RASPUTIN_SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop"  # optional; quote it — your SSH key
 ```
 
-On first boot the uci-defaults one-shot assigns WAN/LAN ports (eth1 = WAN,
-eth0 = LAN on the reference hardware), enables nftables flow offload,
-starts the agent, and syncs the seed into UCI. Re-run
-`/usr/lib/rasputin/apply-seed` any time the seed changes; if the seed is
-blank the agent simply waits. Enrollment is normally driven from the control
-plane's Add-node flow.
+On first boot the uci-defaults one-shots harden SSH to key-only, stage the
+ESP seed (if present), assign WAN/LAN ports (eth1 = WAN, eth0 = LAN on the
+reference hardware), enable nftables flow offload, start the agent, and
+sync the seed into UCI. Re-run `/usr/lib/rasputin/apply-seed` any time the
+seed changes; if the seed is blank the agent simply waits. Enrollment is
+normally driven from the control plane's Add-node flow.
 
 ## Releases
 

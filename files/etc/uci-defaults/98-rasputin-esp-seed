@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# 98-rasputin-esp-seed — first-boot seed pickup from the ESP FAT (RASPUTIN-FW).
+#
+# Parity with the compute image's FAT-seed flow (provisioning.md §1): after
+# flashing the A/B disk, the operator mounts the FAT ESP on their laptop and
+# drops the enrollment file at its root — no SSH, no console. That matters
+# because the image ships key-LESS and key-ONLY (no baked SSH key, password
+# auth disabled unconditionally by 96-rasputin-dropbear-harden), so a freshly
+# flashed box has NO network login until a seed supplies the operator's key —
+# the old flow of scp-ing seed.env onto a fresh box can't work anymore. The
+# ESP is the delivery path that needs no credentials: physical possession of
+# the disk is the auth, exactly like the compute image.
+#
+# Runs before 99-rasputin (whose apply-seed consumes the staged seed). Accepts
+# either name at the ESP root: rasputin-seed.env (the compute convention — one
+# story for every node type) or seed.env (what the Add-node wizard downloads
+# for a firewall). Never overwrites an existing non-empty seed: uci-defaults
+# only run on a fresh overlay so one shouldn't exist, but if fulfillment
+# pre-staged it, that wins.
+#
+# uci-defaults re-run after a full reflash (overlay wiped) — exactly the case
+# that needs re-seeding. A same-layout A/B slot update preserves the overlay
+# (and the applied seed/key) and does not re-run this.
+#
+# Known gap (tracked in the wiki backlog): the seed left on the ESP keeps its
+# join token in plaintext — the compute firstboot scrubs the consumed token
+# from its seed FAT; this script doesn't yet (the token is one-time and
+# node-bound, so exposure is bounded).
+
+set -eu
+
+SEED_DST=/etc/rasputin/seed.env
+MNT=/tmp/rasputin-esp-seed
+
+if [ -s "$SEED_DST" ]; then
+	logger -t rasputin "esp-seed: $SEED_DST already present; leaving it"
+	exit 0
+fi
+
+# Locate the ESP by its FAT label — the same way the agent's A/B update
+# backend finds it for grubenv ops (block-mount is a baked package).
+DEV=$(block info 2>/dev/null | sed -n 's/^\(\/dev\/[^:]*\):.*LABEL="RASPUTIN-FW".*/\1/p' | head -1)
+if [ -z "$DEV" ]; then
+	logger -t rasputin "esp-seed: no RASPUTIN-FW vfat found; skipping"
+	exit 0
+fi
+
+mkdir -p "$MNT"
+if ! mount -t vfat -o ro "$DEV" "$MNT" 2>/dev/null; then
+	logger -t rasputin "esp-seed: mount $DEV failed; skipping"
+	exit 0
+fi
+
+for name in rasputin-seed.env seed.env; do
+	if [ -s "$MNT/$name" ]; then
+		mkdir -p /etc/rasputin
+		cp "$MNT/$name" "$SEED_DST"
+		chmod 600 "$SEED_DST"
+		logger -t rasputin "esp-seed: staged $name from the ESP -> $SEED_DST"
+		break
+	fi
+done
+
+umount "$MNT" 2>/dev/null || true
+rmdir "$MNT" 2>/dev/null || true
+exit 0
