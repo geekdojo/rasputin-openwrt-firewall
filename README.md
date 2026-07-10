@@ -11,8 +11,8 @@ failure. Opinionated where you want guidance, open where you want control,
 and built to work in the first hour.
 
 > **Want to run Rasputin, not build it?** Flashable images and a four-step
-> quickstart live in
-> [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases).
+> quickstart live at
+> [rasputin.geekdojo.com/download](https://rasputin.geekdojo.com/download/).
 
 This repo builds the OpenWrt-based firewall image for the Rasputin **Node N**
 (Intel N100 + dual 2.5GbE Intel i226-V). One repo, one SKU
@@ -72,7 +72,7 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   Published releases up to and including `2026.07.1-dev.55` baked a
   disclosed geekdojo support key — the first no-vendor-key firewall release
   is anything newer (see
-  [`rasputin-releases`](https://github.com/geekdojo/rasputin-releases)).
+  [the releases](https://github.com/geekdojo/rasputin-openwrt-firewall/releases)).
 - **IPv6 is disabled by design** — the whole Rasputin stack is IPv4-only for
   now.
 
