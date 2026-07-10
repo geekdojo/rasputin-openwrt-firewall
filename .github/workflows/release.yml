@@ -542,27 +542,3 @@ jobs:
           else
             echo "::warning::PATCH immutable=true did not take effect on this release (immutable=$result). The feature likely needs enablement at Settings → General → Releases or via org-tier toggle. Process discipline + Settings → Tags protection rules are the working backstop until then."
           fi
-
-      # Mirror the signed assets to the PUBLIC release channel
-      # (geekdojo/rasputin-releases), tag-namespaced "fw-<version>". The
-      # Rasputin control plane reads that public repo anonymously to discover
-      # firewall updates (Check for Updates) — source repos stay private, no
-      # token on appliances. RASPUTIN_RELEASES is an org secret: a token with
-      # Contents:write on rasputin-releases only. Idempotent (create-or-clobber)
-      # so a re-run of this job re-pushes assets without deleting the release.
-      - name: Mirror to public release channel
-        env:
-          GH_TOKEN: ${{ secrets.RASPUTIN_RELEASES }}
-        run: |
-          set -eu
-          PRERELEASE_FLAG=""
-          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-          tag="fw-${{ steps.ver.outputs.version }}"
-          gh release create "$tag" --repo geekdojo/rasputin-releases \
-            --title "Rasputin Firewall ${{ steps.ver.outputs.version }}" \
-            --notes "Mirrored from \`rasputin-openwrt-firewall@${{ steps.ver.outputs.version }}\` (channel: \`${{ steps.ver.outputs.channel }}\`). Signed; per-asset SHA-256 in \`manifest.json\`." \
-            $PRERELEASE_FLAG \
-            release-out/* \
-          || gh release upload "$tag" --repo geekdojo/rasputin-releases --clobber release-out/*
