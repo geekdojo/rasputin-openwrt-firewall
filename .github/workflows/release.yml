@@ -135,13 +135,13 @@ jobs:
       - name: Init OpenWrt ImageBuilder (download if not cached)
         run: ./scripts/init-imagebuilder.sh
 
-      # The agent binary lives in a PRIVATE control-plane release; same
-      # auth dance as rasputin-os (fine-grained PAT, Contents:read on
-      # geekdojo/rasputin-control-plane). The amd64 binary works on
-      # OpenWrt's musl since rasputin-agent is CGO_ENABLED=0 static Go.
-      - name: Fetch vendored rasputin-agent (private control-plane release)
+      # The agent binary lives in the (now-public) control-plane release;
+      # github.token reads it (was a fine-grained PAT while control-plane was
+      # private — ADR-0002). The amd64 binary works on OpenWrt's musl since
+      # rasputin-agent is CGO_ENABLED=0 static Go.
+      - name: Fetch vendored rasputin-agent (control-plane release)
         env:
-          GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Pinned agent version — SINGLE SOURCE OF TRUTH is ./agent-version.txt
