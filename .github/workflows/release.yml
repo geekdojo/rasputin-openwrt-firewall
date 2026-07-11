@@ -501,7 +501,7 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
           gh release create "${{ steps.ver.outputs.version }}" \
-            --title "Rasputin Firewall ${{ steps.ver.outputs.version }}" \
+            --title "Rasputin OpenWrt Firewall ${{ steps.ver.outputs.version }}" \
             --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (\`vars.RASPUTIN_ROOT_CA_PEM\` on the geekdojo org) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile root-ca.pem\`. Per-asset SHA-256 in \`manifest.json\`. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
             $PRERELEASE_FLAG \
             release-out/*
