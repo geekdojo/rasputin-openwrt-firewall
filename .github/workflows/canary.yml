@@ -69,7 +69,7 @@ jobs:
 
       - name: Fetch vendored rasputin-agent
         env:
-          GH_TOKEN: ${{ secrets.CONTROL_PLANE_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Pinned agent version — read from ./agent-version.txt, the SAME
