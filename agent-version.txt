@@ -50,4 +50,9 @@
 #                        authorized keys (no vendor key baked, pipeline cannot
 #                        inject one) + Add-node wizard seed field. Lockstep
 #                        stable across control-plane / os / firewall.
-2026.07.1
+#   2026.07.2 (2026-07-12): lockstep stable — rebuilt from the 2026.07.2 control
+#                        plane (api clock-gates its TLS leaf mint so a no-RTC node
+#                        no longer serves an expired cert, + bounded api shutdown).
+#                        No functional agent change; keeps the firewall agent in
+#                        lockstep with control-plane / os.
+2026.07.2
