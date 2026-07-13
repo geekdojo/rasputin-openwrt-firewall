@@ -55,4 +55,14 @@
 #                        no longer serves an expired cert, + bounded api shutdown).
 #                        No functional agent change; keeps the firewall agent in
 #                        lockstep with control-plane / os.
-2026.07.2
+#   2026.07.3 (2026-07-13): lockstep stable. No functional agent change (the
+#                        2026.07.3 control-plane work — bus auth fail-closed by
+#                        default, bus-auth-off alert, convergent mesh enrollment —
+#                        is all api-side). The substantive firewall content is the
+#                        upstream refresh a rebuild pulls: OpenWrt package/CVE
+#                        updates flagged by canary #6 (2026-07-06) — libopenssl3
+#                        3.5.7, dnsmasq-full 2.93, ca-bundle 20260601, the snort3
+#                        runtime libs (libdaq3/libpcap1/libpcre2), and the LuCI
+#                        stack. Snort Community Rules pin unchanged (verified
+#                        current vs upstream 2026-07-13).
+2026.07.3
