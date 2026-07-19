@@ -65,4 +65,15 @@
 #                        runtime libs (libdaq3/libpcap1/libpcre2), and the LuCI
 #                        stack. Snort Community Rules pin unchanged (verified
 #                        current vs upstream 2026-07-13).
-2026.07.3
+#   2026.07.4 (2026-07-19): lockstep stable. No functional agent change on the
+#                        firewall role (the 2026.07.4 control-plane cycle —
+#                        VIEW LOGS UI wiring, AGENTS.md — is api/ui/docs-side).
+#                        Firewall content this stable ships: Snort Community
+#                        Rules refresh (pin cb8374c8, ~4017 rules, Talos weekly
+#                        republish caught mid-cut 2026-07-19) + release notes
+#                        now point at the published root CA
+#                        (rasputin.geekdojo.com/rasputin-root-ca.pem, #11).
+#                        ZERO OpenWrt package drift vs 2026.07.3 (dev.62 SBOM
+#                        byte-identical to the 2026.07.3 stable SBOM; canary #6
+#                        closed as acted-on).
+2026.07.4
