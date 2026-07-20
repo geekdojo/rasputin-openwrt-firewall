@@ -1,10 +1,16 @@
 name: canary
 
-# Weekly drift + CVE detector. Builds the same firewall image we'd ship
-# for a release, diffs the resulting package manifest against the latest
-# stable release's manifest, and runs CVE scanners against both. If
-# anything changed or any CVE matches, opens (or updates) a GitHub
-# issue with a copy-pasteable suggested cut command.
+# Weekly drift + OpenWrt-currency detector. Builds the same firewall image
+# we'd ship for a release, diffs the resulting package manifest against the
+# latest stable release's manifest, and checks whether the pinned OpenWrt
+# base is behind its latest point release. If packages drifted or the base
+# is behind, opens (or updates) a GitHub issue with a suggested cut command.
+#
+# (Generic image CVE scanners — trivy/osv — were retired 2026-07-20: proven
+# unable to read OpenWrt package data. OpenWrt owns ~all packages here and
+# ships fixes as point releases + feed updates, so currency IS the CVE
+# signal; the one non-OpenWrt component, rasputin-agent, is CVE-watched by
+# the control-plane's vuln-scan.yml. See the base-currency step below.)
 #
 # What this DOES NOT do:
 #   - Tag anything.
@@ -242,75 +248,42 @@ jobs:
             echo 'DIFFEOF'
           } >> "$GITHUB_OUTPUT"
 
-      # --- CVE scanners — multi-modal sweep -----------------------------
-
-      - name: Install trivy + osv-scanner
+      # --- OpenWrt base currency ----------------------------------------
+      # The trivy + osv-scanner CVE arm was RETIRED here on 2026-07-20. It was
+      # proven (runs 29778507877 + 29781990561) to be structurally incapable of
+      # reading an OpenWrt image: trivy `vm` detects 0 packages / no OS
+      # (Metadata:null, 0 Results), and osv reports "no package sources found".
+      # Neither has an opkg analyzer. Path-fixing them changed nothing.
+      #
+      # The right model: OpenWrt owns ~every package in this image, and ships
+      # security fixes AS point releases + feed updates. So the actionable
+      # signal is CURRENCY, not per-package CVE matching (which would duplicate
+      # OpenWrt's own security process with worse data). Two arms cover it:
+      #   - package DRIFT (below): catches feed updates landing on rebuild.
+      #   - base CURRENCY (this step): catches a newer base point release.
+      # Our only non-OpenWrt component, the rasputin-agent binary, is CVE-watched
+      # upstream by the control-plane's vuln-scan.yml (govulncheck) before it is
+      # vendored here. There is no clean machine-readable OpenWrt advisory feed
+      # to wire in (advisories are split across the announce list, release notes,
+      # and GitHub advisories), so the issue points the human at the point-release
+      # notes for the "what does bumping fix" detail.
+      - name: Check OpenWrt base currency
+        id: base
         run: |
-          set -eu
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin
-          curl -sfL "https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64" \
-            -o /tmp/osv-scanner
-          chmod +x /tmp/osv-scanner
-          sudo mv /tmp/osv-scanner /usr/local/bin/
-          trivy --version
-          osv-scanner --version
-
-      # THE BUG (found 2026-07-20): the "Patch GRUB cmdline" step above ends
-      # with `gzip -f "$img"`, which re-compresses the image and DELETES the
-      # decompressed `.img`. The scan steps then pointed at `${src%.gz}` (that
-      # now-missing `.img`), so both scanners failed with "no such file",
-      # wrote no output, and the count logic fell through to 0. The CVE arm had
-      # never actually scanned anything — every "0 CVEs" was a no-op, not a
-      # clean image. Fix: decompress a scan-only copy here, from the `.img.gz`
-      # that actually exists.
-      - name: Decompress image for scanning
-        run: |
-          set -eu
-          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
-          gunzip -c "$src" > /tmp/scan.img
-          ls -lh /tmp/scan.img
-
-      - name: Scan with trivy (vm mode against the disk image)
-        id: trivy
-        run: |
-          set -eu
-          # `vm` (not `rootfs`) is the correct mode for a partitioned disk
-          # image — it reads the partition table + filesystems. --list-all-pkgs
-          # lets us MEASURE ingestion (did trivy detect the ~200 opkg packages?)
-          # separately from the vuln count, which is the whole point of this
-          # re-run. Errors are surfaced, not swallowed.
-          trivy vm --quiet --scanners vuln --severity HIGH,CRITICAL \
-            --list-all-pkgs --format json -o canary-out/trivy.json /tmp/scan.img \
-            || echo "::warning::trivy vm exited non-zero"
-          if [ -s canary-out/trivy.json ]; then
-            pkgs=$(jq '[.Results[]?.Packages[]?] | length' canary-out/trivy.json 2>/dev/null || echo 0)
-            count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' canary-out/trivy.json 2>/dev/null || echo 0)
+          set -euo pipefail
+          pinned=$(sed -n 's/.*OPENWRT_VERSION:-\([0-9.]*\)}.*/\1/p' scripts/init-imagebuilder.sh | head -1)
+          series=$(echo "$pinned" | cut -d. -f1-2)
+          # Highest point release in the pinned series from the downloads index.
+          latest=$(curl -sfL https://downloads.openwrt.org/releases/ \
+            | grep -oE "${series}\.[0-9]+" | sort -V | uniq | tail -1 || true)
+          echo "pinned=$pinned latest=${latest:-unknown}"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest:-unknown}" >> "$GITHUB_OUTPUT"
+          if [ -n "$latest" ] && [ "$latest" != "$pinned" ]; then
+            echo "behind=true" >> "$GITHUB_OUTPUT"
           else
-            pkgs=0; count=0
+            echo "behind=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "trivy packages detected: $pkgs"
-          echo "trivy high/critical findings: $count"
-          echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-      - name: Scan with osv-scanner (second opinion)
-        id: osv
-        run: |
-          set -eu
-          # osv-scanner has no OpenWrt/opkg parser and can't read a raw disk
-          # image; even pointed at the real file it will likely find no package
-          # source. Kept as a measurement data point — if it detects 0 packages,
-          # that confirms a manifest-based approach is required for osv.
-          osv-scanner scan --format json --output-file canary-out/osv.json /tmp/scan.img 2>&1 \
-            | tee canary-out/osv-stderr.txt || true
-          if [ -s canary-out/osv.json ]; then
-            count=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' canary-out/osv.json 2>/dev/null || echo 0)
-          else
-            count=0
-          fi
-          echo "osv high+ findings: $count"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
 
       # --- decide + report ----------------------------------------------
 
@@ -319,12 +292,11 @@ jobs:
         run: |
           set -eu
           drift="${{ steps.diff.outputs.changed }}"
-          trivy="${{ steps.trivy.outputs.count }}"
-          osv="${{ steps.osv.outputs.count }}"
+          behind="${{ steps.base.outputs.behind }}"
           force="${{ github.event.inputs.force_issue }}"
-          # Open an issue if ANY of: drift detected, trivy found a CVE,
-          # osv found a CVE, manually forced.
-          if [ "$drift" = "true" ] || [ "${trivy:-0}" -gt 0 ] || [ "${osv:-0}" -gt 0 ] || [ "$force" = "true" ]; then
+          # Open an issue if ANY of: package drift detected, the OpenWrt base
+          # is behind its latest point release, manually forced.
+          if [ "$drift" = "true" ] || [ "$behind" = "true" ] || [ "$force" = "true" ]; then
             echo "open_issue=true" >> "$GITHUB_OUTPUT"
           else
             echo "open_issue=false" >> "$GITHUB_OUTPUT"
@@ -363,32 +335,36 @@ jobs:
               echo "_No package version changes detected._"
             fi
             echo
-            echo "### CVE scan"
+            echo "### OpenWrt base currency"
             echo
-            echo "| Scanner | Packages detected | High/Critical findings |"
-            echo "|---|---|---|"
-            echo "| trivy (vm) | ${{ steps.trivy.outputs.pkgs }} | ${{ steps.trivy.outputs.count }} |"
-            echo "| osv-scanner | — | ${{ steps.osv.outputs.count }} |"
+            echo "OpenWrt owns ~every package in this image and ships security fixes as point"
+            echo "releases + feed updates, so currency (not per-package CVE scanning) is the signal."
+            if [ "${{ steps.base.outputs.behind }}" = "true" ]; then
+              echo
+              echo "⚠️ **Base is behind:** pinned \`${{ steps.base.outputs.pinned }}\`, latest in series is \`${{ steps.base.outputs.latest }}\`."
+              echo "Bump \`OPENWRT_VERSION\` in \`scripts/init-imagebuilder.sh\`, rebuild, re-validate on hardware."
+              echo "What the bump fixes: see the [\`${{ steps.base.outputs.latest }}\` release notes](https://downloads.openwrt.org/releases/${{ steps.base.outputs.latest }}/) / the openwrt-announce list."
+            else
+              echo
+              echo "✅ On the latest point release in the series (\`${{ steps.base.outputs.pinned }}\`)."
+            fi
             echo
-            echo "_A '0 packages detected' from trivy means the scanner can't read this image's package DB — treat 0 findings as unmeasured, not clean._"
-            echo
-            echo "Raw JSON outputs uploaded as workflow artifacts."
+            echo "_The rasputin-agent binary (our only non-OpenWrt component) is CVE-watched separately by the control-plane's \`vuln-scan.yml\`. Generic image CVE scanners (trivy/osv) were retired — proven unable to read OpenWrt package data._"
             echo
             echo "### Suggested action"
             echo
             if [ "${{ steps.diff.outputs.changed }}" = "true" ] || \
-               [ "${{ steps.trivy.outputs.count }}" -gt 0 ] || \
-               [ "${{ steps.osv.outputs.count }}" -gt 0 ]; then
+               [ "${{ steps.base.outputs.behind }}" = "true" ]; then
               echo "Cut \`$suggested\`:"
               echo
               echo '```sh'
-              echo "git tag -a $suggested -m \"canary $today — pick up package updates\""
+              echo "git tag -a $suggested -m \"canary $today — pick up OpenWrt base / package updates\""
               echo "git push origin $suggested"
               echo '```'
               echo
-              echo "If a CVE drove this, mention the CVE id(s) in the tag message."
+              echo "If a base bump drove this, update \`OPENWRT_VERSION\` first."
             else
-              echo "_Forced issue: no drift or CVEs to act on._"
+              echo "_Forced issue: no drift or base update to act on._"
             fi
             echo
             echo "---"
