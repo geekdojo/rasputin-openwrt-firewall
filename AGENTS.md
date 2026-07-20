@@ -22,3 +22,7 @@ Repo facts an agent should know:
   commits.
 - The seed file goes on the FAT volume labeled `RASPUTIN-FW` (not `RASPUTIN-OS`); see
   the README for the firewall seed reference.
+- A commit or PR that fixes a tracked issue must use a **closing keyword** —
+  `Fixes #N` / `Closes #N` — not a bare `(#N)` reference. Bare references leave the
+  issue open after the fix ships (audited 2026-07-20: four of six stale-open issues
+  across the rasputin repos were exactly this).
