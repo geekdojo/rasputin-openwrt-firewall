@@ -256,37 +256,53 @@ jobs:
           trivy --version
           osv-scanner --version
 
-      - name: Scan with trivy (rootfs mode against the .img)
+      # THE BUG (found 2026-07-20): the "Patch GRUB cmdline" step above ends
+      # with `gzip -f "$img"`, which re-compresses the image and DELETES the
+      # decompressed `.img`. The scan steps then pointed at `${src%.gz}` (that
+      # now-missing `.img`), so both scanners failed with "no such file",
+      # wrote no output, and the count logic fell through to 0. The CVE arm had
+      # never actually scanned anything — every "0 CVEs" was a no-op, not a
+      # clean image. Fix: decompress a scan-only copy here, from the `.img.gz`
+      # that actually exists.
+      - name: Decompress image for scanning
+        run: |
+          set -eu
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          gunzip -c "$src" > /tmp/scan.img
+          ls -lh /tmp/scan.img
+
+      - name: Scan with trivy (vm mode against the disk image)
         id: trivy
         run: |
           set -eu
-          # Trivy has growing OpenWrt coverage but isn't perfect; treat
-          # findings as signal, not gospel. We run in rootfs mode against
-          # the decompressed .img — trivy auto-detects partitions.
-          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
-          img="${src%.gz}"
-          # img already decompressed by the cmdline-patch step
-          trivy rootfs --quiet --scanners vuln --severity HIGH,CRITICAL \
-            --format json -o canary-out/trivy.json "$img" 2>/dev/null || \
-            echo "(trivy returned non-zero — common when no DB hits; continuing)"
-          # Count high+critical findings
+          # `vm` (not `rootfs`) is the correct mode for a partitioned disk
+          # image — it reads the partition table + filesystems. --list-all-pkgs
+          # lets us MEASURE ingestion (did trivy detect the ~200 opkg packages?)
+          # separately from the vuln count, which is the whole point of this
+          # re-run. Errors are surfaced, not swallowed.
+          trivy vm --quiet --scanners vuln --severity HIGH,CRITICAL \
+            --list-all-pkgs --format json -o canary-out/trivy.json /tmp/scan.img \
+            || echo "::warning::trivy vm exited non-zero"
           if [ -s canary-out/trivy.json ]; then
+            pkgs=$(jq '[.Results[]?.Packages[]?] | length' canary-out/trivy.json 2>/dev/null || echo 0)
             count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' canary-out/trivy.json 2>/dev/null || echo 0)
           else
-            count=0
+            pkgs=0; count=0
           fi
+          echo "trivy packages detected: $pkgs"
           echo "trivy high/critical findings: $count"
+          echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
-      - name: Scan with osv-scanner (second opinion against the package list)
+      - name: Scan with osv-scanner (second opinion)
         id: osv
         run: |
           set -eu
-          # OSV-Scanner doesn't have a native "OpenWrt manifest" parser,
-          # so we feed it the rootfs and let it auto-detect.
-          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
-          img="${src%.gz}"
-          osv-scanner --format json --output canary-out/osv.json "$img" 2>&1 \
+          # osv-scanner has no OpenWrt/opkg parser and can't read a raw disk
+          # image; even pointed at the real file it will likely find no package
+          # source. Kept as a measurement data point — if it detects 0 packages,
+          # that confirms a manifest-based approach is required for osv.
+          osv-scanner scan --format json --output-file canary-out/osv.json /tmp/scan.img 2>&1 \
             | tee canary-out/osv-stderr.txt || true
           if [ -s canary-out/osv.json ]; then
             count=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' canary-out/osv.json 2>/dev/null || echo 0)
@@ -349,10 +365,12 @@ jobs:
             echo
             echo "### CVE scan"
             echo
-            echo "| Scanner | High/Critical findings |"
-            echo "|---|---|"
-            echo "| trivy | ${{ steps.trivy.outputs.count }} |"
-            echo "| osv-scanner | ${{ steps.osv.outputs.count }} |"
+            echo "| Scanner | Packages detected | High/Critical findings |"
+            echo "|---|---|---|"
+            echo "| trivy (vm) | ${{ steps.trivy.outputs.pkgs }} | ${{ steps.trivy.outputs.count }} |"
+            echo "| osv-scanner | — | ${{ steps.osv.outputs.count }} |"
+            echo
+            echo "_A '0 packages detected' from trivy means the scanner can't read this image's package DB — treat 0 findings as unmeasured, not clean._"
             echo
             echo "Raw JSON outputs uploaded as workflow artifacts."
             echo
