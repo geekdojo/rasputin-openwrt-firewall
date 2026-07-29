@@ -40,7 +40,7 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # confirmed, while cutting the first 2026.07.4 dev build).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="38580b4754cd4095598b198f042c2a44f0acce3a197ffc009dc5c2920431f956"
+PINNED_SHA="9876b64a9684aaff432b4ef8015a2d19bd508dc87d9f706fee4a89b4e9e5eae8"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
