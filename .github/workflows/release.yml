@@ -106,6 +106,50 @@ jobs:
             echo "channel=dev" >> "$GITHUB_OUTPUT"
           fi
 
+      # The pinned agent MUST belong to the release being cut.
+      #
+      # It did not, for four consecutive stables. agent-version.txt was last
+      # bumped 2026-07-19 to 2026.07.4, and firewall stables 2026.07.5, .6, .7
+      # and .8 all shipped that same agent — so a box labelled 2026.07.8 ran a
+      # 2026.07.4 agent, and nothing said so. The build validated only that the
+      # file EXISTS and is non-empty, then downloaded whatever it named.
+      #
+      # This drifted because the firewall's release model is deliberately
+      # independent — it needs no control-plane or OS build first, it just
+      # downloads an already-published agent. That independence is about BUILD
+      # ORDERING, and it quietly became independence of VERSION: nobody has to
+      # bump the pin to cut a release, so eventually nobody did.
+      #
+      # "No functional agent change" is not a defence. It is a judgement that
+      # can be wrong, it makes the version on the tin a lie, it creates
+      # api/agent pairs nobody tests, and it withholds agent fixes from the one
+      # node type sitting on the WAN edge.
+      #
+      # Stable: the pin must equal the tag exactly.
+      # Dev:    the pin's BASE must match, but dev.N may differ — the two repos
+      #         have independent run counters, so agent 2026.07.9-dev.79 inside
+      #         firewall 2026.07.9-dev.12 is correct, not drift.
+      - name: Pinned agent must match the release version
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+        run: |
+          PIN=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
+          [ -n "$PIN" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          base() { printf '%s' "${1%%-dev.*}"; }
+          if [ "$CHANNEL" = stable ]; then
+            if [ "$PIN" != "$VERSION" ]; then
+              echo "::error::stable $VERSION would ship agent $PIN. A stable is lockstep: bump agent-version.txt to $VERSION (it must already be published on rasputin-control-plane) and add a changelog entry."
+              exit 1
+            fi
+          else
+            if [ "$(base "$PIN")" != "$(base "$VERSION")" ]; then
+              echo "::error::dev build $VERSION would ship agent $PIN — different base versions ($(base "$VERSION") vs $(base "$PIN")). dev.N may differ between repos; the base may not."
+              exit 1
+            fi
+          fi
+          echo "pinned agent $PIN matches $CHANNEL release $VERSION"
+
       # Free space — ImageBuilder + downloaded packages comfortably fit on
       # a stock runner, but Suricata pulls in a sizable rule set and the
       # output image dir grows. Cheap insurance.
