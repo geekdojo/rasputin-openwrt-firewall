@@ -19,6 +19,12 @@ SEED=/etc/rasputin/seed.env
 # Defaults — overridden by seed.env if present.
 RASPUTIN_NODE_ROLE=firewall
 RASPUTIN_NODE_ID=
+# The cluster's name (ADR-0003). Defaults to "rasputin" so a firewall whose
+# seed predates per-cluster naming keeps resolving the control plane at
+# rasputin.local — which on this box is load-bearing: musl has no nss-mdns, so
+# the agent's hostsync republishing this name into dnsmasq is the ONLY way
+# tailscaled reaches the mesh login server.
+RASPUTIN_CLUSTER_ID=rasputin
 RASPUTIN_NATS_URL=
 RASPUTIN_CP_JOIN_TOKEN=
 RASPUTIN_SSH_AUTHORIZED_KEY=
@@ -155,6 +161,7 @@ set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
 set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
 set rasputin.main.join_token='${RASPUTIN_CP_JOIN_TOKEN:-}'
 set rasputin.main.node_id='${NODE_ID}'
+set rasputin.main.cluster_id='${RASPUTIN_CLUSTER_ID:-rasputin}'
 commit rasputin
 EOF
 
