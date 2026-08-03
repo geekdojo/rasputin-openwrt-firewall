@@ -76,4 +76,17 @@
 #                        ZERO OpenWrt package drift vs 2026.07.3 (dev.62 SBOM
 #                        byte-identical to the 2026.07.3 stable SBOM; canary #6
 #                        closed as acted-on).
-2026.07.4
+#   2026.07.9-dev.79 (2026-08-03): DEV pin for the E2 cluster-naming bench. The
+#                        agent now DERIVES the control plane's name from
+#                        RASPUTIN_CLUSTER_ID instead of hardcoding rasputin.local.
+#                        On this box that is load-bearing: hostsync republishing
+#                        the name into the dnsmasq hostsdir is the ONLY way
+#                        tailscaled resolves the mesh login server (musl has no
+#                        nss-mdns). Pairs with the seed -> apply-seed -> UCI ->
+#                        procd plumbing in #20; without BOTH, a named cluster's
+#                        firewall republishes the WRONG name and the mesh
+#                        silently never connects. Defaults to "rasputin", so an
+#                        unnamed cluster is unchanged. NOTE: jumps the pin from
+#                        the 2026.07.4 stable to a DEV release — deliberate, for
+#                        the bench; the next stable must re-pin to a stable.
+2026.07.9-dev.79
