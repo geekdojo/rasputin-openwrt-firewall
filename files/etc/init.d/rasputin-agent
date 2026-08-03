@@ -19,6 +19,7 @@ start_service() {
 	config_get join_token main join_token
 	config_get node_role  main node_role  firewall
 	config_get node_id    main node_id
+	config_get cluster_id main cluster_id rasputin
 
 	# If the operator hasn't filled the seed yet, log + back off — procd
 	# will respawn on the configured cadence. Avoid a tight crash loop.
@@ -46,6 +47,11 @@ start_service() {
 	procd_append_param env RASPUTIN_NATS_URL="$nats_url"
 	procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
 	[ -n "$node_id" ] && procd_append_param env RASPUTIN_NODE_ID="$node_id"
+	# The cluster's name, which the agent turns into "<cluster-id>.local" for
+	# hostsync. Always passed (with a default) rather than conditionally: an
+	# unset value here would leave the agent deriving its own default, which is
+	# the same answer today but silently diverges the moment the default moves.
+	procd_append_param env RASPUTIN_CLUSTER_ID="${cluster_id:-rasputin}"
 	# Trust root for verifying signed update images before sysupgrade.
 	procd_append_param env RASPUTIN_TRUST_ROOT=/etc/rasputin/trust/root-ca.pem
 	# Agent state (updater bookkeeping, mock-backend state). Without this
