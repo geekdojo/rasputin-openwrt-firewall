@@ -1,0 +1,9 @@
+#!/bin/sh
+# Refresh the console IP banner when the WAN or LAN interface changes — netifd
+# sets $INTERFACE and $ACTION in this hotplug context. The LAN ifup at boot gives
+# the first paint (so the banner is populated even with no WAN cable); WAN
+# up/renew/down keep the address current. See /usr/lib/rasputin/rasputin-issue-ip.sh.
+[ "$INTERFACE" = "wan" ] || [ "$INTERFACE" = "lan" ] || exit 0
+case "$ACTION" in
+	ifup|ifupdate|ifdown) /usr/lib/rasputin/rasputin-issue-ip.sh ;;
+esac
