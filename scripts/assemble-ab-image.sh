@@ -8,7 +8,8 @@
 # script extracts the kernel + rootfs squashfs from it and hands them to genimage
 # with image/genimage.cfg, which assembles our GPT layout:
 #
-#   [ESP: bootx64.efi + /boot/vmlinuz + /boot/grub/{grub.cfg,grubenv}]
+#   [ESP RASPUTINEFI: bootx64.efi + /boot/vmlinuz + /boot/grub/{grub.cfg,grubenv}]
+#   [seed RASPUTIN-FW (basic-data FAT, ships empty)]
 #   [rootfs-0 squashfs] [rootfs-1 squashfs (same at flash)] [rootfs_data]
 #
 # We build our OWN grub EFI (grub-mkimage) with the loadenv + test modules the
@@ -124,6 +125,16 @@ ROOTFS_DATA_MB=512
 dd if=/dev/zero of="$INPUT/rootfs_data.ext4" bs=1M count="$ROOTFS_DATA_MB" status=none
 mkfs.ext4 -q -F -L rootfs_data "$INPUT/rootfs_data.ext4"
 echo "assemble-ab: built empty rootfs_data.ext4 (${ROOTFS_DATA_MB}M, label=rootfs_data)"
+
+# --- 5c. empty seed placeholder for the RASPUTIN-FW seed FAT -----------------
+# The seed lives on its own basic-data FAT now (genimage.cfg `seed.vfat`), not
+# the ESP, so it auto-mounts on a laptop like the compute image. genimage's
+# vfat `file` entry needs a source: stage an EMPTY rasputin-seed.env. The
+# firewall ships unseeded — 98-rasputin-seed's `-s` (non-empty) test skips an
+# empty seed, so this reads as "no seed" until the operator or the flasher
+# writes a real one onto the partition.
+: > "$INPUT/rasputin-seed.env"
+echo "assemble-ab: staged empty seed placeholder (RASPUTIN-FW FAT ships unseeded)"
 
 # --- 6. assemble the A/B disk with genimage ---------------------------------
 # genimage insists on a --rootpath even though our layout embeds pre-built
