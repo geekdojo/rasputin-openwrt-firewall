@@ -89,4 +89,10 @@
 #                        unnamed cluster is unchanged. NOTE: jumps the pin from
 #                        the 2026.07.4 stable to a DEV release — deliberate, for
 #                        the bench; the next stable must re-pin to a stable.
-2026.07.9-dev.79
+#   v2026.07.9-dev.84 (2026-08-04): agent resolves the ESP by RASPUTINEFI (falls
+#                        back to RASPUTIN-FW only when absent). REQUIRED by the
+#                        seed-off-ESP layout in this same image: RASPUTIN-FW is
+#                        now the SEED partition, so an older agent would write
+#                        grubenv to the seed and never activate a slot. Ships in
+#                        lockstep with the genimage/seed-pickup change.
+2026.07.9-dev.84
