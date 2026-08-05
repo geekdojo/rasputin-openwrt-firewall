@@ -95,4 +95,16 @@
 #                        now the SEED partition, so an older agent would write
 #                        grubenv to the seed and never activate a slot. Ships in
 #                        lockstep with the genimage/seed-pickup change.
-2026.07.9-dev.84
+#   2026.07.9 (2026-08-05): FIRST STABLE re-pin off the dev.84 bench pin (per the
+#                        dev.79 note above). Lockstep stable across control-plane /
+#                        os / firewall for the E2 Cluster Discovery & Identity
+#                        release — per-cluster <cluster>.local naming (ADR-0003),
+#                        two-cluster collision detection, MagicDNS, firewall
+#                        console IP banner, Option-B unified flasher. No functional
+#                        agent change vs dev.84 (same CP source, acb43d2 → the
+#                        v2026.07.9 stable tarball). The rebuild also refreshes the
+#                        OpenWrt feed for the pinned 25.12.4 base (LuCI 26.207,
+#                        canary #19). OpenWrt base bump 25.12.4 → 25.12.5 is
+#                        DEFERRED — a human-only, hardware-re-validated step, not
+#                        part of this lockstep cut.
+2026.07.9
