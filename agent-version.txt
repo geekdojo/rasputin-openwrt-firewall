@@ -107,4 +107,14 @@
 #                        canary #19). OpenWrt base bump 25.12.4 → 25.12.5 is
 #                        DEFERRED — a human-only, hardware-re-validated step, not
 #                        part of this lockstep cut.
-2026.07.9
+#   2026.08.0 (2026-08-06): lockstep stable across control-plane / os / firewall.
+#                        No functional agent change vs 2026.07.9 (same agent
+#                        source). The 2026.08.0 payload is the #75 fix — the
+#                        rasputin-os node.env cluster-id backfill migration (os #35),
+#                        the control-plane localhost public-base-url guardrail
+#                        (cp #76), and the seed-template node-id doc fix (os #36) —
+#                        none of it agent-side. Firewall content: the OpenWrt feed
+#                        refresh a rebuild pulls off the pinned 25.12.4 base.
+#                        OpenWrt base bump 25.12.4 -> 25.12.5 remains DEFERRED
+#                        (human-only, hardware-re-validated).
+2026.08.0
