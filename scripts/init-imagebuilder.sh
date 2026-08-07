@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Pinned OpenWrt release. 25.12 line (released Dec 2025, multiple stable
-# point releases; 25.12.4 current as of 2026-06-07). We migrated off the
+# point releases; 25.12.5 current as of 2026-08-07). We migrated off the
 # 24.10 line in 2026-06 — 24.10 EOLs ~Sep 2026 and design-partner units
 # would have shipped already by then. 25.12 brings the apk packaging
 # migration (vs opkg/ipk in 24.10), which is forward-relevant when we
@@ -21,7 +21,7 @@ set -euo pipefail
 #
 # Bump the point release here when 25.12.5+ ships; the canary workflow
 # will flag the divergence so it's not silent.
-OPENWRT_VERSION="${OPENWRT_VERSION:-25.12.4}"
+OPENWRT_VERSION="${OPENWRT_VERSION:-25.12.5}"
 TARGET="x86/64"
 TARGET_DIR="$(echo "$TARGET" | tr / -)"   # x86-64
 # OpenWrt switched ImageBuilder distribution from .tar.xz → .tar.zst in 24.10
