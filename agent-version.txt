@@ -117,4 +117,12 @@
 #                        refresh a rebuild pulls off the pinned 25.12.4 base.
 #                        OpenWrt base bump 25.12.4 -> 25.12.5 remains DEFERRED
 #                        (human-only, hardware-re-validated).
-2026.08.0
+#   2026.08.1 (2026-08-07): lockstep stable. No functional agent change vs
+#                        2026.08.0 (same agent source). Firewall content: the
+#                        OpenWrt base bump 25.12.4 -> 25.12.5 (canary #19),
+#                        DEFERRED across the last two stables, now SHIPS — the
+#                        human-only hardware re-validation happened on the bench
+#                        cluster 2026-08-07 (25.12.5 r33051 boots, snort3 IDS up,
+#                        first-use ESP-seed path confirmed). Lockstep across
+#                        control-plane / os / firewall.
+2026.08.1
