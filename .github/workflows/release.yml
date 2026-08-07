@@ -129,7 +129,7 @@ jobs:
       # Dev:    the pin's BASE must match, but dev.N may differ — the two repos
       #         have independent run counters, so agent 2026.07.9-dev.79 inside
       #         firewall 2026.07.9-dev.12 is correct, not drift.
-      - name: Pinned agent must match the release version
+      - name: Validate pinned agent vs release version
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           CHANNEL: ${{ steps.ver.outputs.channel }}
@@ -138,17 +138,31 @@ jobs:
           [ -n "$PIN" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
           base() { printf '%s' "${1%%-dev.*}"; }
           if [ "$CHANNEL" = stable ]; then
+            # STABLE is lockstep: a stable ships the exact-version agent, and
+            # stables go out at the SAME version across control-plane / os /
+            # firewall at the same time (end-user usability — one version to
+            # reason about), even for a repo that didn't otherwise change. This
+            # stays a hard gate.
             if [ "$PIN" != "$VERSION" ]; then
               echo "::error::stable $VERSION would ship agent $PIN. A stable is lockstep: bump agent-version.txt to $VERSION (it must already be published on rasputin-control-plane) and add a changelog entry."
               exit 1
             fi
           else
+            # DEV is NOT lockstep, deliberately (Bryce, 2026-08-07). A dev build
+            # ships whatever agent is currently pinned so we can bench-test an
+            # image change (an OpenWrt base bump, a package fix) WITHOUT first
+            # cutting a stable just to line the versions up — that would churn
+            # the stable line. The dev version tracks the org var's forward
+            # target while the agent pin can trail on the last stable (or lead
+            # on a dev agent); dev.N and even the base may differ between repos.
+            # The only hard requirement is that the pin RESOLVES to a published
+            # agent — the download step enforces that. Warn on a base mismatch
+            # for visibility; never block.
             if [ "$(base "$PIN")" != "$(base "$VERSION")" ]; then
-              echo "::error::dev build $VERSION would ship agent $PIN — different base versions ($(base "$VERSION") vs $(base "$PIN")). dev.N may differ between repos; the base may not."
-              exit 1
+              echo "::warning::dev build $VERSION ships agent $PIN (base $(base "$PIN") vs dev target $(base "$VERSION")) — allowed: the agent is pinned independently of the dev version. Bump agent-version.txt when you want a newer agent in dev images."
             fi
           fi
-          echo "pinned agent $PIN matches $CHANNEL release $VERSION"
+          echo "pinned agent $PIN accepted for $CHANNEL release $VERSION"
 
       # Free space — ImageBuilder + downloaded packages comfortably fit on
       # a stock runner, but Suricata pulls in a sizable rule set and the
