@@ -145,4 +145,11 @@
 #                        server line AND its rebind_domain whitelist, so a stripped whitelist
 #                        surfaces as drift. Fixes the bench finding behind dev.95's forward.
 #                        (control-plane #102)
-2026.08.2-dev.96
+#   2026.08.2 (2026-08-10): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned from the dev.96 prerelease to the CP STABLE
+#                        2026.08.2 (same agent source as dev.96 — the E3 rebind_domain
+#                        fix rides in). No functional agent change vs dev.96; the rebuild
+#                        also refreshes the OpenWrt 25.12.5 feed packages at build time.
+#                        Ships the E3 App Access work (Mode-A/C .internal DNS forward +
+#                        rebind_domain whitelist), bench-validated on 2026.08.2-dev.84.
+2026.08.2
