@@ -125,4 +125,13 @@
 #                        cluster 2026-08-07 (25.12.5 r33051 boots, snort3 IDS up,
 #                        first-use ESP-seed path confirmed). Lockstep across
 #                        control-plane / os / firewall.
-2026.08.1
+#   2026.08.2-dev.95 (2026-08-09): DEV pin for the E3 App Access bench. The agent's
+#                        OpenWrt UCI backend now applies the `dhcp` conditional-forward
+#                        (dns_forward intent, ADR-0004 §10): server=/<cluster-id>.internal/<cp-ip>
+#                        on dnsmasq so a Mode-A/C firewall forwards the cluster's internal
+#                        zone to the control plane, add_list/del_list-reconciled (upstream
+#                        servers preserved) with dhcp-key drift read-back. REQUIRED for the
+#                        Mode-A DNS zone forward — an older agent REJECTS the new top-level
+#                        `dhcp` key and the WHOLE firewall apply fails. Jumps from the
+#                        2026.08.1 stable to a DEV pin for the bench; next stable re-pins.
+2026.08.2-dev.95
