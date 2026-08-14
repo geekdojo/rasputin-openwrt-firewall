@@ -152,4 +152,20 @@
 #                        also refreshes the OpenWrt 25.12.5 feed packages at build time.
 #                        Ships the E3 App Access work (Mode-A/C .internal DNS forward +
 #                        rebind_domain whitelist), bench-validated on 2026.08.2-dev.84.
-2026.08.2
+#   2026.08.3-dev.105 (2026-08-14): DEV pin — #92. The agent's openwrt-ab backend
+#                        no longer returns the bundle's sha256 as the installed version
+#                        (its `installedVersion` fallback, removed in the CP by #111 +
+#                        a971dd9). The OLD pin returned that sha, the api recorded it as
+#                        `to_version`, and verify's conjunct (c) then compared a real
+#                        CalVer against a content hash — so EVERY firewall update failed
+#                        `version_mismatch` once the 2026-08-12 verify work began
+#                        evaluating that conjunct. Bench-confirmed on e3bench: updates
+#                        committed 2026-08-10, failed from 2026-08-12 on.
+#                        The api-side fix (control-plane #127, shipped in
+#                        2026.08.3-dev.105 / OS dev.163) already protects against a
+#                        lagging agent and was VALIDATED against this very pin still in
+#                        place — a firewall update committed at 15:30 on 2026-08-14 with
+#                        the old 2026.08.2 agent. This bump stops the agent lying in the
+#                        first place, which is the other half.
+#                        Jumps from the 2026.08.2 STABLE to a DEV pin; next stable re-pins.
+2026.08.3-dev.105
