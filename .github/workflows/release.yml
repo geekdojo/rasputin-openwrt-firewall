@@ -47,32 +47,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Shell script syntax
-        run: |
-          set -e
-          for f in scripts/*.sh \
-                   files/etc/init.d/* \
-                   files/etc/uci-defaults/*; do
-            test -f "$f" || continue
-            echo "bash -n $f"; bash -n "$f"
-          done
-      - name: Repo structure
-        run: |
-          set -e
-          req="README.md packages.txt agent-version.txt
-               scripts/init-imagebuilder.sh
-               scripts/fetch-snort-rules.sh
-               scripts/assemble-ab-image.sh
-               image/grub.cfg
-               image/genimage.cfg
-               files/etc/init.d/rasputin-agent
-               files/etc/uci-defaults/99-rasputin
-               files/etc/snort/rasputin-extra.lua
-               files/etc/rasputin/seed.env.template
-               files/etc/rasputin/trust/README.md"
-          for f in $req; do
-            test -f "$f" && echo "ok  $f" || { echo "MISSING $f" >&2; exit 1; }
-          done
+      # Syntax + executable modes + required paths. Extracted to a script so this job and
+      # ci.yml (which gates pull requests) run the IDENTICAL checks from one file — the
+      # inline copy that used to live here could only drift from whatever a PR-time check
+      # did, and this repo has already paid for the same config living in two workflows
+      # (the agent-version.txt pin). It also gained a mode check the inline version could
+      # never have had: `bash -n` cannot see that an init script shipped non-executable,
+      # which is how PR #26 published a fix that silently never ran.
+      - name: Validate shipped files
+        run: ./scripts/validate-files.sh
 
   build:
     needs: validate
