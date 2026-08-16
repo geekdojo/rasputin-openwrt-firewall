@@ -1,0 +1,85 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-ipv4-only — re-assert IPv4-only AFTER netifd has configured the
+# interfaces (Decision #9: Rasputin runs a single, auditable address family).
+#
+# WHY THIS EXISTS — a boot-ordering race, not a missing setting.
+#
+# /etc/sysctl.d/99-rasputin-no-ipv6.conf is correct and sufficient. It is simply
+# applied too early: OpenWrt's stock sysctl init is START=11, and netifd starts
+# at START=20 — nine steps later — and writes `disable_ipv6` per device as it
+# brings each one up, overwriting what we set. The result on the bench CWWK
+# (2026-08-16, firewall #132):
+#
+#     lo=0   eth0=1   eth1=1(WAN)→0   br-lan=1
+#
+# i.e. IPv6 was left ENABLED on the WAN — the untrusted side, and the one place
+# a second stack least belongs — carrying a live fe80:: link-local, while the
+# LAN side happened to keep the setting. `all` and `default` do not fix this:
+# they are applied before the devices netifd later re-enables.
+#
+# WHAT WAS MEASURED, so the next person doesn't re-derive it:
+#   - `/etc/init.d/sysctl restart` after boot → lo 0→1, eth1 0→1, and EVERY
+#     IPv6 address disappears. So the file is right; the timing is wrong.
+#   - `ifup wan` afterwards → eth1 STAYS 1, no v6 addresses return, and the WAN
+#     comes back on IPv4 normally. netifd re-enables IPv6 only during its
+#     initial bring-up, never on a later interface event.
+#
+# That second measurement is what makes a one-shot re-assert sufficient, and it
+# is why this is NOT a hotplug.d/iface hook: a per-ifup hook would be guarding
+# against something that does not happen.
+#
+# WHY NOT FIX THE CAUSE INSTEAD. Telling netifd never to enable IPv6 on a device
+# (a device-level `option ipv6 '0'`) would be the better fix — prevention rather
+# than re-assertion. It is not used here because this build's netifd could not be
+# confirmed to support it (`strings /sbin/netifd` has no bare `ipv6` token), and
+# an unverified capability is not something to build a security property on. If
+# that is ever confirmed, this script can be deleted rather than amended — the
+# observable behaviour is identical.
+#
+# WHY NOT PATCH THE STOCK sysctl INIT. /etc/init.d/sysctl is OpenWrt's file; a
+# package upgrade replaces it. That is the same trap documented for the tailscale
+# init in uci-defaults/99-rasputin. We ship our own file instead.
+#
+# START=99: after netifd (20), dnsmasq (60), odhcpd (35) and rasputin-dhcp-auto
+# (65) — last, deliberately, so nothing that configures an interface runs after
+# us. Every action here is idempotent, so running late costs nothing.
+
+START=99
+
+boot() {
+	# 1. Re-apply the kernel-level disable that netifd clobbered. `sysctl -e`
+	#    ignores keys that do not exist rather than aborting the file, matching
+	#    how the stock init reads it.
+	if [ -f /etc/sysctl.d/99-rasputin-no-ipv6.conf ]; then
+		sysctl -e -p /etc/sysctl.d/99-rasputin-no-ipv6.conf >/dev/null 2>&1
+		logger -t rasputin "ipv4-only: re-applied IPv6 disable after netifd (Decision #9)"
+	else
+		logger -t rasputin "ipv4-only: WARNING — /etc/sysctl.d/99-rasputin-no-ipv6.conf missing; IPv6 may be live"
+	fi
+
+	# 2. Stop odhcpd. It is OpenWrt's IPv6 daemon (RA + DHCPv6) and has no job on
+	#    an IPv4-only box: uci-defaults/97-rasputin-disable-ipv6 already sets
+	#    dhcp.lan.ra/dhcpv6 to 'disabled', and dnsmasq owns DHCPv4
+	#    (dhcp.lan.dhcpv4='server', dhcp.odhcpd.maindhcp='0') — so nothing here
+	#    depends on it. It was still running and enabled on the bench.
+	#
+	#    Exposure today is nil (it holds no listeners in this configuration);
+	#    this is attack-surface reduction on the security node, not a live hole.
+	#
+	#    Done here rather than in uci-defaults on purpose: uci-defaults run only
+	#    on a fresh overlay, so an already-deployed box carried across a
+	#    sysupgrade would keep its S35odhcpd symlink forever. Running every boot
+	#    is idempotent and self-heals those.
+	if [ -x /etc/init.d/odhcpd ]; then
+		/etc/init.d/odhcpd disable 2>/dev/null
+		/etc/init.d/odhcpd stop 2>/dev/null
+		logger -t rasputin "ipv4-only: odhcpd stopped and disabled (IPv6 daemon, unused on IPv4-only)"
+	fi
+}
+
+# Manual `start` does the same thing, so an operator (or a bench run) can
+# re-assert without a reboot.
+start() {
+	boot
+}
