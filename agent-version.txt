@@ -168,4 +168,15 @@
 #                        the old 2026.08.2 agent. This bump stops the agent lying in the
 #                        first place, which is the other half.
 #                        Jumps from the 2026.08.2 STABLE to a DEV pin; next stable re-pins.
-2026.08.3-dev.105
+#   2026.08.3 (2026-08-15): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned from the dev.105 prerelease to the CP STABLE
+#                        2026.08.3, per the dev.105 note above ("next stable re-pins").
+#                        No functional agent change vs dev.105 — the #92 fix (openwrt-ab
+#                        no longer returns the bundle sha256 as installedVersion, which
+#                        was failing verify conjunct (c) on EVERY firewall update) is the
+#                        same agent source and rides in. The rebuild also refreshes the
+#                        OpenWrt 25.12.5 feed packages at build time.
+#                        Ships alongside the E5 Progressive Fleet Updates payload
+#                        (canary -> bounded fan-out -> best-effort report; UPDATE ALL now
+#                        includes the controlplane), which is api-side — no agent change.
+2026.08.3
