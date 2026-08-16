@@ -164,6 +164,10 @@ mkdir -p /etc/rasputin/mesh /etc/tailscale
 /etc/init.d/rasputin-agent enable
 /etc/init.d/snort enable
 /etc/init.d/tailscale enable
+# Re-asserts IPv4-only after netifd, which re-enables IPv6 per device during its
+# initial bring-up and so undoes the S11 sysctl on the WAN. See the script's
+# header for the measurements; without it eth1 boots with IPv6 live (#132).
+/etc/init.d/rasputin-ipv4-only enable
 # Conflict-aware LAN DHCP: decide (each boot, before dnsmasq) whether to serve
 # DHCP based on whether another server is already present. Serves it when we're
 # the router (Mode A/C bootstrap — the cluster needs addresses to reach the
