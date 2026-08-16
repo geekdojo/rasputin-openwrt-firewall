@@ -1,0 +1,52 @@
+##
+## ci.yml — the only workflow that gates a PULL REQUEST on this repo.
+##
+## WHY IT EXISTS (geekdojo/geekdojo-brain#147)
+##   Until 2026-08-16 nothing validated a change on its way in. release.yml carries a
+##   `validate` job, but it is tag/dispatch-triggered, so it only ever ran at RELEASE
+##   time — the point at which a finding is most expensive. cla.yml was the sole
+##   pull_request trigger, which meant "all checks green" on a PR meant one CLA check
+##   and nothing about the code.
+##
+##   That is not theoretical: PR #26 merged an init script at mode 644. On a fresh flash
+##   it could not be enabled, so the IPv6 re-assert it shipped never ran and the WAN kept
+##   a live second address family. Caught only by hand afterwards (#27).
+##
+## WHAT IT RUNS
+##   scripts/validate-files.sh — the single source of truth for these checks, invoked
+##   identically here and from release.yml's validate job. Deliberately a script rather
+##   than inline steps: this repo has already been bitten by the same configuration
+##   living in two workflows and drifting out of sync (the agent-version.txt pin), and a
+##   check that disagrees with itself is worse than no check.
+##
+## PERMISSIONS
+##   Read-only. This workflow never publishes, tags, or touches a release; it has no
+##   reason to hold write scope, and a PR from a fork must not acquire one.
+##
+name: ci
+
+on:
+  pull_request:
+  # Also on pushes to main, so a direct commit (the solo-dev path this repo uses for
+  # small fixes) is not exempt from the checks a PR would have faced.
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref — these checks are cheap
+  # and stateless, so there is nothing to preserve in a run that is already stale.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-files:
+    name: Validate shipped files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax, executable modes, and required paths
+        run: ./scripts/validate-files.sh
