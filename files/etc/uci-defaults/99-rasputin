@@ -161,13 +161,30 @@ EOF
 mkdir -p /etc/rasputin/mesh /etc/tailscale
 
 # --- Enable services (do not start yet — uci-defaults runs pre-procd) ---
+#
+# NOTE (bench-verified 2026-08-16): the IMAGE already ships every one of these
+# enabled. `ls -l /rom/etc/rc.d/` — the squashfs lower layer — carries the full
+# set stamped at image build time (K10rasputin-agent, K10snort,
+# S65rasputin-dhcp-auto, S80tailscale, S90rasputin-agent, S99rasputin-growpart,
+# S99rasputin-ipv4-only, S99snort). ImageBuilder enables init scripts it finds
+# under files/, so these `enable` calls only rewrite symlinks that already
+# exist, leaving a redundant copy in the overlay — which is why the merged
+# /etc/rc.d/ shows first-boot timestamps for exactly the ones named below and
+# build-time timestamps for the ones that are not.
+#
+# They are kept as belt-and-braces: harmless, idempotent, and a cheap guard if a
+# packaged service ever ships disabled by default. Do NOT read them as the thing
+# that makes a service run — the image is.
+#
+# The corollary matters more than the redundancy: because activation is baked
+# into the rootfs rather than applied by this script, a NEW init script under
+# files/ reaches OTA-upgraded boxes too, not just fresh flashes. uci-defaults
+# cannot do that — they are whiteout-masked in the overlay after first boot and
+# never re-run. rasputin-ipv4-only (#132) was validated over OTA on exactly this
+# mechanism; it deliberately carries no `enable` line here.
 /etc/init.d/rasputin-agent enable
 /etc/init.d/snort enable
 /etc/init.d/tailscale enable
-# Re-asserts IPv4-only after netifd, which re-enables IPv6 per device during its
-# initial bring-up and so undoes the S11 sysctl on the WAN. See the script's
-# header for the measurements; without it eth1 boots with IPv6 live (#132).
-/etc/init.d/rasputin-ipv4-only enable
 # Conflict-aware LAN DHCP: decide (each boot, before dnsmasq) whether to serve
 # DHCP based on whether another server is already present. Serves it when we're
 # the router (Mode A/C bootstrap — the cluster needs addresses to reach the
