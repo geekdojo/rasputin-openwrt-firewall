@@ -179,4 +179,18 @@
 #                        Ships alongside the E5 Progressive Fleet Updates payload
 #                        (canary -> bounded fan-out -> best-effort report; UPDATE ALL now
 #                        includes the controlplane), which is api-side — no agent change.
-2026.08.3
+#   2026.08.4-dev.114 (2026-08-17): picks up the control plane's session of security
+#                        work. No functional agent change — everything here is
+#                        control-plane-side or UI-side — but the pin moves so the image
+#                        carries the same build everything else does.
+#                        Landed in that CP release: CodeQL dataflow analysis gating PRs
+#                        AND releases against a reviewed register (brain #104), with 0
+#                        real critical/high findings; eslint installed and gating (brain
+#                        #148), which found nine eslint-disable comments waiving rules for
+#                        a linter that had never been installed; and Next 15 -> 16.3.1,
+#                        clearing four HIGH npm advisories that had no patched 15.x, plus
+#                        all 46 React Compiler errors the upgrade surfaced.
+#                        Jumps from the 2026.08.3 STABLE to a DEV pin; next stable re-pins.
+#                        The rebuild also refreshes the rolling OpenWrt feed packages at
+#                        build time, which is the usual second half of a firewall rev.
+2026.08.4-dev.114
