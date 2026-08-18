@@ -1,7 +1,7 @@
 # rasputin-openwrt-firewall
 
 [![Release](https://github.com/geekdojo/rasputin-openwrt-firewall/actions/workflows/release.yml/badge.svg)](https://github.com/geekdojo/rasputin-openwrt-firewall/actions/workflows/release.yml)
-[![Latest](https://img.shields.io/github/v/release/geekdojo/rasputin-openwrt-firewall?include_prereleases&label=release)](https://github.com/geekdojo/rasputin-openwrt-firewall/releases)
+[![Latest](https://img.shields.io/github/v/release/geekdojo/rasputin-openwrt-firewall?label=release)](https://github.com/geekdojo/rasputin-openwrt-firewall/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-E8590C.svg)](LICENSE)
 
 The firewall of **Rasputin** — an open-source homelab cluster system: a small
