@@ -62,10 +62,25 @@ jobs:
       # The seed scrub blanks a credential during first-boot provisioning, and
       # ImageBuilder packages files/ verbatim without executing anything — a
       # broken scrub would build, sign and publish cleanly.
-      - name: Install dosfstools for the vfat test tiers
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq dosfstools
+      - name: Ensure mkfs.vfat is available
+        timeout-minutes: 5
+        run: |
+          # Skip the package manager entirely when the tool is already here —
+          # which on the hosted images it usually is. apt is the slowest and by
+          # far the least reliable part of this job, so the best version of this
+          # step is the one that does nothing.
+          if command -v mkfs.vfat >/dev/null 2>&1; then
+            echo "dosfstools already present at $(command -v mkfs.vfat)"
+            exit 0
+          fi
+          # DPkg::Lock::Timeout so apt FAILS on a held lock instead of waiting
+          # on it forever, and DEBIAN_FRONTEND so nothing can stop for a prompt
+          # no one is there to answer.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 dosfstools
 
       - name: Seed-scrub functional test
+        timeout-minutes: 5
         env:
           REQUIRE_FAT: "1"
         run: ./scripts/test-seed-scrub.sh
