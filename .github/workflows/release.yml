@@ -384,9 +384,18 @@ jobs:
             echo "qemu-system-x86 + ovmf already present"
             exit 0
           fi
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            --no-install-recommends -o DPkg::Lock::Timeout=120 qemu-system-x86 ovmf
+          # Acquire::* as well as DPkg::Lock::Timeout, because they cover
+          # DIFFERENT hangs and only the lock one was covered before. The lock
+          # timeout does nothing for a stalled mirror fetch, and a stalled fetch
+          # is what this step did twice on 2026-08-19 — ten minutes of silence,
+          # no output at all, while the SAME run's build job had installed its
+          # genimage packages through apt minutes earlier.
+          APT_OPTS="-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3"
+          APT_OPTS="$APT_OPTS -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          # -q not -qq: some output is what tells the next person WHERE it stalled.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -q $APT_OPTS
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+            --no-install-recommends $APT_OPTS qemu-system-x86 ovmf
       - uses: actions/download-artifact@v4
         with:
           pattern: fw-n100-*
