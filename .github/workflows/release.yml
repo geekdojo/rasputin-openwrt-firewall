@@ -305,6 +305,7 @@ jobs:
           key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
 
       - name: Assemble A/B image (genimage post-process)
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           ver="${{ steps.ver.outputs.version }}"
@@ -312,8 +313,13 @@ jobs:
           # disk (ESP + rootfs-0/1 + rootfs_data). grub2 tools build our own EFI
           # loader with the loadenv+test modules the boot-counter needs; mtools/
           # fdisk/util-linux extract kernel+rootfs; genimage assembles.
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
+          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
+          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
+          # the smoke job, on top of a 28-minute one in ci.yml the same night.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            -o DPkg::Lock::Timeout=120 \
             genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
@@ -367,7 +373,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install QEMU + OVMF
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+        timeout-minutes: 10
+        run: |
+          set -eu
+          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
+          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
+          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
+          # the smoke job, on top of a 28-minute one in ci.yml the same night.
+          if command -v qemu-system-x86_64 >/dev/null 2>&1 && [ -e /usr/share/OVMF/OVMF_CODE.fd ]; then
+            echo "qemu-system-x86 + ovmf already present"
+            exit 0
+          fi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            --no-install-recommends -o DPkg::Lock::Timeout=120 qemu-system-x86 ovmf
       - uses: actions/download-artifact@v4
         with:
           pattern: fw-n100-*
