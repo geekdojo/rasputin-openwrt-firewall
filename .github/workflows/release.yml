@@ -390,6 +390,18 @@ jobs:
           # is what this step did twice on 2026-08-19 — ten minutes of silence,
           # no output at all, while the SAME run's build job had installed its
           # genimage packages through apt minutes earlier.
+          # Point apt at the Azure regional mirror before doing anything else.
+          # The runners live in Azure; archive.ubuntu.com is the canonical
+          # archive and is the thing that actually stalled here — on 2026-08-19
+          # this step fetched packages.microsoft.com and dl.google.com in
+          # milliseconds, reached archive.ubuntu.com, and then emitted NOTHING
+          # for nine and a half minutes until the step timeout. Acquire::*
+          # timeouts do not save you from a transfer that trickles rather than
+          # dies, so the fix is to stop asking the slow host.
+          # Noble uses deb822, older images the one-line format; rewrite both.
+          sudo sed -i 's|https\?://archive\.ubuntu\.com|http://azure.archive.ubuntu.com|g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources \
+            /etc/apt/sources.list.d/*.list 2>/dev/null || true
           APT_OPTS="-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3"
           APT_OPTS="$APT_OPTS -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
           # -q not -qq: some output is what tells the next person WHERE it stalled.
