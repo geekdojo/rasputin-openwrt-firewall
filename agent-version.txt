@@ -193,4 +193,33 @@
 #                        Jumps from the 2026.08.3 STABLE to a DEV pin; next stable re-pins.
 #                        The rebuild also refreshes the rolling OpenWrt feed packages at
 #                        build time, which is the usual second half of a firewall rev.
-2026.08.4-dev.114
+#   2026.08.4-dev.116 (2026-08-19): the firewall stops applying unsigned OTA
+#                        artifacts. REQUIRED by this image's own security
+#                        posture, and the first agent bump in a while that is
+#                        NOT cosmetic: defaultVerifySig used to log one line and
+#                        return nil, so the only integrity gate on a firewall
+#                        update was a sha256 compare over mesh TLS — which
+#                        authenticates the TRANSPORT, not the PUBLISHER.
+#                        Anything that could reach the bundle store reached this
+#                        box, and this box terminates the WAN. The agent now
+#                        verifies the release's detached CMS ${rootfs}.sig
+#                        against /etc/rasputin/trust/root-ca.pem — the trust root
+#                        this image has baked and RASPUTIN_TRUST_ROOT has pointed
+#                        at since the init script was written, with nothing ever
+#                        reading it — and FAILS CLOSED. Highest-severity finding
+#                        in the STRIDE model (brain #154, control-plane#150).
+#                        ⚠️ Needs a control plane on 2026.08.4-dev.116 or newer:
+#                        the api half stages the .sig and sends SigURL, and an
+#                        agent that gets no signature URL refuses the update
+#                        rather than falling back to the sha gate. Pairing this
+#                        image with an older control plane means firewall
+#                        updates stop, loudly and on purpose.
+#                        Also carries `rasputin-agent verify-artifact`, which is
+#                        what a manual sysupgrade uses to check an image by hand
+#                        (OpenWrt ships libopenssl, not the openssl CLI).
+#                        Shipped alongside this repo's own #130 fix — the seed
+#                        FAT's consumed join token is now scrubbed after
+#                        provisioning — which is a files/ change, not an agent
+#                        one. Rebuild also picks up canary #30's luajit2 bump
+#                        off the rolling feed; OpenWrt base stays 25.12.5.
+2026.08.4-dev.116
