@@ -450,7 +450,20 @@ jobs:
   sign-and-release:
     needs: [build, smoke-fw]
     # Publishes on a tag OR on a dispatch with publish=true (run-number dev release).
-    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
+    #
+    # ⚠️ `success() &&`, not `!cancelled() &&`, and the difference is the whole
+    # gate. GitHub implies success() ONLY when an `if:` contains no status-check
+    # function; `!cancelled()` IS one, so it REPLACED the implicit requirement
+    # that `needs` succeeded. The smoke boot has therefore never gated
+    # publishing — it merely had to finish, or not finish, either way.
+    #
+    # Caught 2026-08-19 the only way this ever gets caught: smoke-fw failed (its
+    # QEMU install timed out, so the image was never booted at all) and
+    # sign-and-release published 2026.08.4-dev.93 twenty-seven seconds later,
+    # signed and into the dev channel, where the control plane offered it as an
+    # update to the firewall. A gate that reads like a gate and is not one is
+    # worse than no gate, because the release notes say it booted.
+    if: ${{ success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
