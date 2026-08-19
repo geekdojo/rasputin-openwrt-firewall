@@ -37,10 +37,14 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # ~4017 rules; independently re-fetched from snort.org HTTPS + tarball
 # structure confirmed unchanged, while unblocking the first A/B build) →
 # 2026-07-19 (cb8374c81524..., independently re-fetched + structure
-# confirmed, while cutting the first 2026.07.4 dev build).
+# confirmed, while cutting the first 2026.07.4 dev build) → 2026-08-19
+# (eff40760b4e2..., ~4017 rules; independently re-fetched from snort.org
+# over HTTPS and the tarball structure confirmed unchanged rather than
+# copying the SHA the failed build printed, while cutting the dev image
+# that carries the #154 signature verification).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="9028e08a857c7ecef20f8ca54163165288c66e8824a7ac44cf8d815feecfb814"
+PINNED_SHA="eff40760b4e257f87e95dbc7110271a18918c61afdcb315ce1e0c56537a3f462"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
