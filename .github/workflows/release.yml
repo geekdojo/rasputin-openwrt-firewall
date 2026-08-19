@@ -57,6 +57,19 @@ jobs:
       - name: Validate shipped files
         run: ./scripts/validate-files.sh
 
+      # Same reasoning as the static checks above: run the identical behavioural
+      # test a PR faced, at the point a finding is most expensive to discover.
+      # The seed scrub blanks a credential during first-boot provisioning, and
+      # ImageBuilder packages files/ verbatim without executing anything — a
+      # broken scrub would build, sign and publish cleanly.
+      - name: Install dosfstools for the vfat test tiers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dosfstools
+
+      - name: Seed-scrub functional test
+        env:
+          REQUIRE_FAT: "1"
+        run: ./scripts/test-seed-scrub.sh
+
   build:
     needs: validate
     # full_build arrives as a real boolean from the UI checkbox but as the

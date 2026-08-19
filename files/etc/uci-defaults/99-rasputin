@@ -82,7 +82,21 @@ commit dhcp
 EOF
 
 # --- Apply seed (writes /etc/config/rasputin; blank values are OK) ---
-/usr/lib/rasputin/apply-seed || logger -t rasputin "99-rasputin: apply-seed returned non-zero (continuing)"
+if /usr/lib/rasputin/apply-seed; then
+	# The join token is now in /etc/config/rasputin, where the agent reads it,
+	# and in /etc/rasputin/seed.env on the overlay, which survives slot
+	# switches and sysupgrade. The copy still sitting on the seed FAT is a
+	# credential at rest that nothing will ever read again — blank it.
+	#
+	# ONLY on this path. apply-seed failing means the token was not consumed,
+	# and scrubbing it then would destroy the operator's seed while leaving the
+	# box unprovisioned. The scrub never fails this script (it exits 0 on every
+	# path of its own); the `|| true` is belt-and-braces against `set -e` here.
+	# geekdojo/geekdojo-brain#130.
+	/usr/lib/rasputin/scrub-seed-token || true
+else
+	logger -t rasputin "99-rasputin: apply-seed returned non-zero (continuing)"
+fi
 
 # --- Snort3 IDS in tap mode (decision locked 2026-06-08) ---
 #

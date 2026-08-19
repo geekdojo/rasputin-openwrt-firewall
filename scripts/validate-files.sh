@@ -73,6 +73,10 @@ image/genimage.cfg
 files/etc/init.d/rasputin-agent
 files/etc/init.d/rasputin-ipv4-only
 files/etc/uci-defaults/99-rasputin
+files/etc/uci-defaults/98-rasputin-seed
+files/usr/lib/rasputin/apply-seed
+files/usr/lib/rasputin/seed-fat-device
+files/usr/lib/rasputin/scrub-seed-token
 files/etc/sysctl.d/99-rasputin-no-ipv6.conf
 files/etc/snort/rasputin-extra.lua
 files/etc/rasputin/seed.env.template
