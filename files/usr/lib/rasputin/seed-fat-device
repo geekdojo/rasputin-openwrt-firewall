@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# seed-fat-device — print the block device of the seed FAT, or nothing.
+#
+# Exists so the label lives in ONE place. Two scripts need this partition and
+# they need it for opposite reasons: 98-rasputin-seed mounts it read-only to
+# stage the seed at first boot, and scrub-seed-token mounts it read-write to
+# blank the consumed join token afterwards. When the lookup was duplicated, a
+# label change would have silently turned the scrub into a no-op — it fails
+# open by design, so the failure would have been a log line nobody reads rather
+# than an error.
+#
+# The label is RASPUTIN-FW, and that name is a leftover worth explaining: it
+# used to be the ESP's label. When the A/B layout gave the seed its own
+# Microsoft-basic-data FAT, the seed partition inherited the name and the ESP
+# became RASPUTINEFI. So RASPUTIN-FW uniquely identifies the SEED partition on
+# the current layout, and the agent's own ESP lookup deliberately prefers
+# RASPUTINEFI for the same reason (openwrt_ab.go parseESPDevice).
+#
+# `block info` comes from block-mount, a baked package (packages.txt). Prints
+# nothing and exits 0 when no seed FAT is present — callers treat that as
+# "nothing to do", never as an error.
+#
+# Usage: DEV=$(/usr/lib/rasputin/seed-fat-device)
+
+block info 2>/dev/null \
+	| sed -n 's/^\(\/dev\/[^:]*\):.*LABEL="RASPUTIN-FW".*/\1/p' \
+	| head -1

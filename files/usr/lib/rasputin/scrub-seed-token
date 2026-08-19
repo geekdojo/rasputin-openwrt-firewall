@@ -1,0 +1,129 @@
+#!/bin/sh
+#
+# scrub-seed-token — blank the consumed one-time join token on the seed FAT.
+#
+# WHY
+#   The enrollment seed arrives on a FAT partition the operator can mount on a
+#   laptop (physical possession is the auth — see 98-rasputin-seed). Once the
+#   box has provisioned, that token lives where the agent actually needs it:
+#   /etc/rasputin/seed.env on the overlay, and /etc/config/rasputin, which
+#   apply-seed regenerates from it. The copy left behind on the FAT is a
+#   credential at rest that nothing ever reads again.
+#
+#   The compute image has scrubbed its equivalent since the FAT-seed flow
+#   shipped (rasputin-os rasputin-firstboot.sh, "scrub the consumed one-time
+#   join token"); the firewall did not. This is that parity gap closed —
+#   geekdojo/geekdojo-brain#130. Exposure was bounded (the token is node-bound
+#   and one-time), which is why this is a Bug and not an incident.
+#
+# WHEN
+#   Called by 99-rasputin AFTER apply-seed returns success, never at stage
+#   time. That ordering is the whole point: 98-rasputin-seed only COPIES the
+#   seed off the FAT, and the token is not "consumed" until apply-seed has
+#   written it into the UCI config the agent reads. Scrubbing at stage time
+#   would blank the operator's seed before anything had used it.
+#
+#   uci-defaults run once on a fresh overlay and self-delete, so this runs
+#   exactly once per provisioning — the same cadence as compute's firstboot.
+#
+# WHAT IT COSTS
+#   Nothing on any update path. The overlay is a partition BOTH slots share
+#   (files/etc/config/fstab), so an A/B update, its rollback, and a
+#   config-preserving sysupgrade never re-read the FAT; a layout-change
+#   sysupgrade or a full flash rewrites the whole disk including this
+#   partition anyway; and a removed-and-re-added firewall is re-seeded by the
+#   control plane's bootstrap_firewall job pushing seed.env directly.
+#
+# IT MUST NEVER FAIL A PROVISION
+#   Deliberately NOT `set -e`, and every failure path logs and exits 0. A
+#   read-only or degraded seed mount just leaves the token: it is node-bound
+#   and single-use, so the cost of not scrubbing is bounded, while the cost of
+#   aborting 99-rasputin partway is a half-configured firewall with no second
+#   chance (uci-defaults self-delete). Same posture as compute's scrub and as
+#   the SSH-key merge beside it.
+#
+# Usage:
+#   scrub-seed-token                 locate and mount the seed FAT itself
+#   scrub-seed-token <mounted-dir>   scrub an already-mounted seed root
+#
+# The optional argument is what makes this testable off-hardware
+# (scripts/test-seed-scrub.sh) and is also the escape hatch for an operator
+# who already has the partition mounted. An argument rather than an
+# environment variable on purpose: it cannot be inherited by accident.
+
+set -u
+
+TOKEN_KEY=RASPUTIN_CP_JOIN_TOKEN
+
+log() { logger -t rasputin "scrub-seed-token: $*" 2>/dev/null || true; }
+
+# scrub_file blanks the token's VALUE, keeping the key and every other line.
+# Returns 0 only when a token was actually present and has been rewritten.
+scrub_file() {
+	f="$1"
+
+	# `=.` — a key with something after it. An already-blank token is not a
+	# failure and not work; distinguishing them is what keeps the log honest
+	# about whether anything was at rest.
+	grep -q "^${TOKEN_KEY}=." "$f" 2>/dev/null || return 1
+
+	tmp="/tmp/rasputin-seed-scrub.$$"
+	if ! sed "s#^${TOKEN_KEY}=.*#${TOKEN_KEY}=#" "$f" > "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		return 1
+	fi
+
+	# Truncate-and-write, NOT mv. $tmp is on tmpfs and the seed is on the FAT,
+	# so a rename would cross filesystems and fail; and rewriting in place
+	# keeps the file's identity on a filesystem with no inodes to preserve.
+	if cat "$tmp" > "$f" 2>/dev/null; then
+		sync
+		rm -f "$tmp"
+		return 0
+	fi
+	rm -f "$tmp"
+	return 1
+}
+
+MNT="${1:-}"
+mounted_here=0
+
+if [ -z "$MNT" ]; then
+	DEV=$(/usr/lib/rasputin/seed-fat-device)
+	if [ -z "$DEV" ]; then
+		log "no seed FAT present; nothing to scrub"
+		exit 0
+	fi
+	MNT=/tmp/rasputin-seed-scrub-mnt
+	mkdir -p "$MNT" 2>/dev/null
+	if ! mount -t vfat -o rw "$DEV" "$MNT" 2>/dev/null; then
+		log "could not mount $DEV read-write; leaving the token (node-bound, single-use)"
+		rmdir "$MNT" 2>/dev/null
+		exit 0
+	fi
+	mounted_here=1
+fi
+
+# Both names, because 98-rasputin-seed accepts both: rasputin-seed.env is the
+# compute convention and seed.env is what the Add-node wizard downloads for a
+# firewall. 98 stages the FIRST one it finds; this scrubs EVERY one present, so
+# a partition carrying both cannot keep a live token in the file that lost.
+scrubbed=0
+for name in rasputin-seed.env seed.env; do
+	[ -f "$MNT/$name" ] || continue
+	if scrub_file "$MNT/$name"; then
+		log "blanked $TOKEN_KEY in $name on the seed FAT"
+		scrubbed=$((scrubbed + 1))
+	fi
+done
+
+if [ "$scrubbed" -eq 0 ]; then
+	log "no consumed token on the seed FAT; nothing to scrub"
+fi
+
+if [ "$mounted_here" -eq 1 ]; then
+	umount "$MNT" 2>/dev/null || true
+	rmdir "$MNT" 2>/dev/null || true
+fi
+
+exit 0

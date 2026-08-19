@@ -50,3 +50,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax, executable modes, and required paths
         run: ./scripts/validate-files.sh
+
+      # The seed scrub blanks a credential on a FAT during first-boot
+      # provisioning, where uci-defaults self-delete and there is no second
+      # chance — syntax and mode checks cannot see it doing the wrong thing.
+      # dosfstools + REQUIRE_FAT make the real-filesystem and label-discovery
+      # tiers MANDATORY here: they skip on a developer Mac, and a runner that
+      # can run them and silently doesn't is the failure this flag prevents.
+      # (geekdojo/geekdojo-brain#130)
+      - name: Install dosfstools for the vfat test tiers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dosfstools
+
+      - name: Seed-scrub functional test
+        env:
+          REQUIRE_FAT: "1"
+        run: ./scripts/test-seed-scrub.sh

@@ -28,10 +28,11 @@
 # that needs re-seeding. A same-layout A/B slot update preserves the overlay
 # (and the applied seed/key) and does not re-run this.
 #
-# Known gap (tracked in the wiki backlog): the seed left on the seed FAT keeps its
-# join token in plaintext — the compute firstboot scrubs the consumed token
-# from its seed FAT; this script doesn't yet (the token is one-time and
-# node-bound, so exposure is bounded).
+# The token left on the seed FAT is scrubbed AFTER provisioning, not here:
+# 99-rasputin calls /usr/lib/rasputin/scrub-seed-token once apply-seed has
+# succeeded. Staging is not consuming — blanking the operator's seed at this
+# point would destroy it before anything had used it. (Was a parity gap with
+# the compute firstboot until 2026-08-19; geekdojo/geekdojo-brain#130.)
 
 set -eu
 
@@ -43,10 +44,10 @@ if [ -s "$SEED_DST" ]; then
 	exit 0
 fi
 
-# Locate the seed FAT by its label (RASPUTIN-FW). block-mount is a baked
-# package; `block info` reports the FS label. The ESP is RASPUTINEFI now, so
-# this uniquely matches the seed partition.
-DEV=$(block info 2>/dev/null | sed -n 's/^\(\/dev\/[^:]*\):.*LABEL="RASPUTIN-FW".*/\1/p' | head -1)
+# Locate the seed FAT by its label. The lookup lives in one place because the
+# scrub path needs the same partition for the opposite reason — see
+# /usr/lib/rasputin/seed-fat-device.
+DEV=$(/usr/lib/rasputin/seed-fat-device)
 if [ -z "$DEV" ]; then
 	logger -t rasputin "seed: no RASPUTIN-FW vfat found; skipping"
 	exit 0
