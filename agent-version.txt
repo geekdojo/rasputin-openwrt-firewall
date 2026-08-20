@@ -222,4 +222,20 @@
 #                        provisioning — which is a files/ change, not an agent
 #                        one. Rebuild also picks up canary #30's luajit2 bump
 #                        off the rolling feed; OpenWrt base stays 25.12.5.
-2026.08.4-dev.116
+#   2026.08.4-dev.117 (2026-08-19): the firewall stops reporting its WAN
+#                        address as its lanIP. The generic heuristic defines the
+#                        LAN address as "the source the kernel would use to
+#                        reach the internet", which is correct on every node
+#                        EXCEPT this one — the firewall's default route leaves
+#                        via WAN, so it reported eth1 (192.168.197.x on the
+#                        bench) instead of br-lan (192.168.1.1).
+#                        Not cosmetic: the control plane projects every node's
+#                        name onto its lanIP for cluster DNS, so this box's name
+#                        resolved to an interface its own WAN input policy
+#                        rejects; the same value fed the mesh advertise-routes
+#                        suggestion, proposing the WAN subnet. The agent now
+#                        asks UCI (network.lan.device -> br-lan) and reads that
+#                        interface's live address, falling back to the old
+#                        heuristic with a logged reason rather than ever
+#                        reporting nothing. brain #193, control-plane#157.
+2026.08.4-dev.117
