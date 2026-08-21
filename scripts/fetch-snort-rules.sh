@@ -41,10 +41,16 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # (eff40760b4e2..., ~4017 rules; independently re-fetched from snort.org
 # over HTTPS and the tarball structure confirmed unchanged rather than
 # copying the SHA the failed build printed, while cutting the dev image
-# that carries the #154 signature verification).
+# that carries the #154 signature verification) → 2026-08-21
+# (4c923f34936a..., 4017 active rules; independently re-fetched from
+# snort.org over HTTPS and the tarball structure confirmed unchanged --
+# same five members under snort3-community-rules/ -- rather than copying
+# the SHA the failed build printed. The two agreed. Blocked the release
+# cut that was validating the rotated signing leaf; the weekly canary did
+# NOT flag it, having last run 2026-08-17 before Talos republished).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="eff40760b4e257f87e95dbc7110271a18918c61afdcb315ce1e0c56537a3f462"
+PINNED_SHA="4c923f34936a51bc2a3621c246af568559f58069b5f7b6c59d43efa8f314c72e"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
