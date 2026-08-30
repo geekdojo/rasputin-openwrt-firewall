@@ -287,4 +287,26 @@
 #                        OpenWrt base stays 25.12.5 (latest in series; no bump).
 #                        Snort community rules re-pinned 4c923f34 -> 89b9b94c in the
 #                        preceding commit (Talos weekly republish).
-2026.08.4-dev.130
+#   2026.08.4 (2026-08-30): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned from the dev.130 prerelease to the CP
+#                        STABLE 2026.08.4, per the dev.130 note above ("next stable
+#                        re-pins"). NO functional agent change vs dev.130 — the same
+#                        CP source (92ab675) builds both, so this is the image that
+#                        was bench-validated, on the stable channel.
+#                        BENCHED, not assumed: dev.102 (this same agent pin) was
+#                        OTA'd onto e3bench-firewall1 2026-08-30 through the control
+#                        plane's own update path — boot id dd58ddd1 -> 89198cfd,
+#                        image dev.101 -> dev.102, agent dev.120 -> dev.130, snort3
+#                        back up and writing alerts within a minute of boot, br-lan
+#                        still reporting 192.168.1.1 (the dev.117 lanIP fix holds).
+#                        The CMS signature path is proven by the update succeeding
+#                        at all: a dev.116+ agent fails closed without a valid .sig.
+#                        Ships the E19 app-catalog-delivery payload, which is
+#                        control-plane and catalog side — no firewall behaviour
+#                        change. The rebuild's own content is the ImageBuilder feed
+#                        refresh per canary #34 (2026-08-24): libmbedtls21 3.6.6-r2
+#                        -> 3.6.7-r1, luajit2 2.1.2025.10.30 -> 2.1.2026.07.31, LuCI
+#                        26.218 -> 26.234, ppp/ppp-mod-pppoe r3 -> r4, plus the
+#                        Snort community rules re-pin 4c923f34 -> 89b9b94c.
+#                        OpenWrt base stays 25.12.5 — latest in series, no bump.
+2026.08.4
