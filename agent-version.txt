@@ -248,4 +248,43 @@
 #                        artifacts through that same module. Rebuild payload is
 #                        the usual ImageBuilder feed refresh on top (canary #30:
 #                        on OpenWrt 25.12.5, latest in series).
-2026.08.4-dev.120
+#   2026.08.4-dev.130 (2026-08-30): bench pin for the 2026.08.4 lockstep stable;
+#                        the next stable re-pins to the bare 2026.08.4 (same CP
+#                        source, 92ab675 -> both this prerelease and that stable).
+#                        NO functional agent change on the firewall path, verified
+#                        by reading the dev.120..dev.130 agent delta rather than
+#                        assuming it:
+#                          - clusterdns, the large new package in this range, is
+#                            INERT here by design — Run() early-returns when the
+#                            systemd-resolved drop-in dir is absent, and its own
+#                            comment names the OpenWrt firewall as that case. The
+#                            firewall keeps resolving via hostsync -> dnsmasq
+#                            hostsdir exactly as before, which on musl is still the
+#                            only way tailscaled reaches the mesh login server.
+#                          - docker/ and proxy/ changes are the E19 app-access work
+#                            (web ports, app leaves, per-app deploy budgets). Not on
+#                            the firewall path — this box runs no apps and no
+#                            per-app proxy.
+#                        The one change that IS on this box's path, and the reason
+#                        the pin must move with the api rather than lag it:
+#                          - updater/handler.go no longer hardcodes 15m download and
+#                            install budgets; it takes proto.UpdateDownloadWork /
+#                            proto.UpdateInstallWork, which the bus reply grant is
+#                            derived from (proto.BusReplyGrantTTL). A budget the
+#                            grant does not outlive is a reply the agent is not
+#                            allowed to send, so agent and api must agree on the
+#                            constant. Pairing this image with an api from a
+#                            different CP build is what that would break.
+#                          - bus/client.go installs a nats.ErrorHandler that names a
+#                            PERMISSIONS VIOLATION and points at BusReplyGrantTTL.
+#                            Diagnostics only, but it is the line that makes the
+#                            failure above legible instead of surfacing on the api as
+#                            "rpc: context deadline exceeded" against the wrong side.
+#                        Rebuild payload on top is the usual ImageBuilder feed
+#                        refresh, per canary #34 (2026-08-24): libmbedtls21 3.6.6-r2
+#                        -> 3.6.7-r1, luajit2 2.1.2025.10.30 -> 2.1.2026.07.31, the
+#                        LuCI stack 26.218 -> 26.234, ppp/ppp-mod-pppoe r3 -> r4.
+#                        OpenWrt base stays 25.12.5 (latest in series; no bump).
+#                        Snort community rules re-pinned 4c923f34 -> 89b9b94c in the
+#                        preceding commit (Talos weekly republish).
+2026.08.4-dev.130
