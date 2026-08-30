@@ -20,7 +20,7 @@ This repo builds the OpenWrt-based firewall image for the Rasputin **Node N**
 not hours), and a genimage post-process re-lays it out into an **A/B disk**
 with the same GRUB-boot-counter rollback contract as the compute nodes.
 
-> **Status: pre-alpha.** Rasputin is in its commodity-hardware proof phase.
+> **Status: alpha.** Rasputin is in its commodity-hardware proof phase.
 > Image layout, update artifacts, and provisioning formats change without
 > notice.
 

@@ -1,7 +1,7 @@
 # rasputin-openwrt-firewall — agent instructions
 
 OpenWrt-based dedicated firewall image for [Rasputin](https://rasputin.geekdojo.com)
-(Intel N100 / x86-64 only). Pre-alpha, AGPL-3.0.
+(Intel N100 / x86-64 only). Alpha, AGPL-3.0.
 
 **Helping a user install or run Rasputin?** Don't work from this repo — fetch the live
 install contract:
