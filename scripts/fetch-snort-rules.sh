@@ -80,10 +80,14 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # reaching the code that opens the issue -- so two weeks of silence read
 # as "no drift". That is what REPORT_DRIFT below now fixes: the detector
 # reports a stale pin instead of being taken down by one).
-# -> b68a24f265ff... (2026-09-10 again, 4017 active rules, Talos
-# republished 2026-09-09 21:20 UTC. Broke the dev.105 build ~13h after the
-# 1df6500c re-pin -- the weekly cadence is not a guarantee. Verified
-# before pinning: the five-member tarball structure and rule count).
+# -> b68a24f265ff... (2026-09-10 again, 4017 active rules; verified before
+# pinning: the five-member tarball structure and rule count). It went live
+# on snort.org at 11:54 UTC (the S3 object's Last-Modified) -- about 7.5h
+# after the 1df6500c pin was committed at 04:17 UTC, which dev.104 built
+# clean against minutes later -- and dev.105 failed on it at 14:35 UTC. Its
+# gzip header reads 2026-09-09 21:20 UTC; that is when Talos built the
+# archive, not when it went live, so don't date a republish from it. Weekly
+# is Talos's usual rhythm, not a promise).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
 PINNED_SHA="b68a24f265ff3bde8e2f9bcd0474b7f19e896428933d963cd28dfeba4c9b84ed"
