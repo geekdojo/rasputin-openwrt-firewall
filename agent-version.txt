@@ -346,10 +346,22 @@
 #                        budget-outlives-grant hazard the dev.130 entry describes.
 #                        Inert here: storage, quiesce, docker (role-gated), storageprobe (not
 #                        shipped), clusterdns (early-returns without /run/systemd).
-#                        Rebuild content per dev.104's SBOM vs 2026.08.4: the LuCI stack
-#                        26.239 -> 26.251 and nothing else, plus the Snort community rules
-#                        re-pin 89b9b94c -> 1df6500c (Talos republished 2026-09-08).
+#                        Rebuild content per the SBOMs: the LuCI stack 26.239 -> 26.251 vs
+#                        2026.08.4 and nothing else (dev.106's SBOM is identical to
+#                        dev.104's), plus the Snort community rules re-pin 89b9b94c ->
+#                        b68a24f2, via 1df6500c (pin history in fetch-snort-rules.sh).
 #                        OpenWrt base stays 25.12.5.
-#                        NOT yet benched on firewall hardware with this agent -- dev.104,
-#                        OTA'd onto cp-firewall1 2026-09-10, still pinned agent 2026.08.4.
+#                        BENCHED, not assumed: dev.106 (this same agent pin and rules) was
+#                        OTA'd onto cp-firewall1 (e12bench) 2026-09-10 through the control
+#                        plane's own update path -- job committed, slot b -> a, image
+#                        dev.104 -> dev.106, agent 2026.08.4 -> 2026.08.5. On the box:
+#                        grubenv A_OK=1 A_TRY=0 ORDER=A B (the running slot marked good at
+#                        agent start, no mark-good error logged); the agent connected to
+#                        the bus and registered the second it started; snort3 running on
+#                        the b68a24f2 rules (4017); br-lan 192.168.1.1/24; mesh joined;
+#                        primaryLanCidr reported as 192.168.1.0/24 and the mesh CA
+#                        fingerprint reported. The CMS signature path is proven by the
+#                        update succeeding at all.
+#                        Not staged: the downside path above -- a trial boot whose agent
+#                        cannot reach the bus.
 2026.08.5
