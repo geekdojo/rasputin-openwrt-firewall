@@ -309,4 +309,47 @@
 #                        26.218 -> 26.234, ppp/ppp-mod-pppoe r3 -> r4, plus the
 #                        Snort community rules re-pin 4c923f34 -> 89b9b94c.
 #                        OpenWrt base stays 25.12.5 — latest in series, no bump.
-2026.08.4
+#   2026.08.5 (2026-09-10): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned 2026.08.4 -> the CP STABLE 2026.08.5 (121a054,
+#                        the same source as the dev.149 that ran inside OS dev.204 on
+#                        e12bench 2026-09-10).
+#                        FUNCTIONAL agent change on this path -- unlike the last several
+#                        stables, so do not read this as a no-op re-pin:
+#                          - The A/B slot is now marked good at agent start, BEFORE the
+#                            bus connects. 8e90b64 moved the first bus connect later
+#                            (main.go ~190 -> ~763) and MarkGoodOnBoot slid ahead of it;
+#                            @2026.08.4 a successful connect was an implicit health gate
+#                            before a new slot was committed. Gain: two reboots with the CP
+#                            down no longer fall through to a stale slot. Loss: an OTA'd
+#                            image whose agent cannot reach the bus on its trial boot is
+#                            committed anyway, and a firewall that has lost its network
+#                            cannot receive a mark-bad over that bus either. Matches
+#                            MarkGoodOnBoot's own doc ("once the agent has reached its own
+#                            userspace").
+#                          - Bus client re-dials after its connection closes and rides auth
+#                            rejections (8e90b64) -- the 17h off-bus after a controlplane
+#                            wipe. nats.go 1.51.0 -> 1.53.1.
+#                          - Reports its mesh CA fingerprint and re-registers after enroll
+#                            (45aa96d), so the api's trust reconcile may re-send the CA once
+#                            after this re-pin, restarting tailscaled.
+#                          - mesh.enroll runs under a 2m budget with a named deadline error,
+#                            replacing a hardcoded 30s (4055285).
+#                          - openwrt-ab validates bundle IDs and paths from the bus
+#                            (5bd6174); no change for the sha256 IDs the api sends.
+#                          - primaryLanCidr is reported as the LAN network (192.168.1.0/24),
+#                            not the host address (677cc0b); the api uses it only to
+#                            suggest advertise-routes.
+#                          - gopsutil 4.24.8 -> 4.26.8.
+#                        The bus reply grant grew 45m -> 60m api-side (BackupTransferWork /
+#                        BackupRestoreVolumeWork entered AgentWorkBudgetMax). A longer grant
+#                        only relaxes the firewall's constraint -- not the
+#                        budget-outlives-grant hazard the dev.130 entry describes.
+#                        Inert here: storage, quiesce, docker (role-gated), storageprobe (not
+#                        shipped), clusterdns (early-returns without /run/systemd).
+#                        Rebuild content per dev.104's SBOM vs 2026.08.4: the LuCI stack
+#                        26.239 -> 26.251 and nothing else, plus the Snort community rules
+#                        re-pin 89b9b94c -> 1df6500c (Talos republished 2026-09-08).
+#                        OpenWrt base stays 25.12.5.
+#                        NOT yet benched on firewall hardware with this agent -- dev.104,
+#                        OTA'd onto cp-firewall1 2026-09-10, still pinned agent 2026.08.4.
+2026.08.5
