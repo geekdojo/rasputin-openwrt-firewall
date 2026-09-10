@@ -24,12 +24,33 @@
 # Usage:
 #   ./scripts/fetch-snort-rules.sh           # idempotent — skips if up to date
 #   FORCE=1 ./scripts/fetch-snort-rules.sh   # re-fetch even if stamp matches
+#   REPORT_DRIFT=1 ./scripts/fetch-snort-rules.sh
+#                                            # a SHA mismatch is a FINDING, not
+#                                            # a failure — see below
+#
+# REPORT_DRIFT exists for the weekly canary (.github/workflows/canary.yml) and
+# for nothing else. That workflow is the drift detector: it rebuilds the image,
+# diffs the package manifest against the last stable's SBOM, and files an issue
+# when something moved. Failing closed here killed it — Talos republishes the
+# tarball on its own schedule, so from 2026-09-07 the canary died at this step
+# and never reached the code that files the issue. Two weeks of no canary issue
+# read as "no drift" and were actually a dead canary: the check meant to warn
+# you was taken down by the very thing it exists to warn about.
+#
+# So with REPORT_DRIFT=1 a mismatch stages the tarball as downloaded, reports
+# both SHAs (stdout, plus $GITHUB_OUTPUT for the workflow to consume), and exits
+# 0 so the build continues. WITHOUT the flag — which is every other caller,
+# release.yml above all — behaviour is unchanged and a mismatch is still fatal.
+# That is deliberate and must stay that way: shipping rules we have not verified
+# onto a security appliance is a supply-chain hole, and a release must never be
+# able to do it by accident.
 
 set -euo pipefail
 
 RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.gz"
 # Talos publishes new Community Rules ~weekly, so this pin drifts and the
-# SHA check fails CI by design; bumping it is the routine refresh path.
+# release build fails closed on it by design (the canary REPORTS it instead —
+# see REPORT_DRIFT above); bumping it is the routine refresh path.
 # History: dev.2 (df1de9995bc6...) → dev.4 (bb947bc02530...) → dev.8
 # (d891178755d7..., 2026-06-12, ~4017 rules) → dev.13 (643dfc20e363...,
 # 2026-06-17) → e913e956ce1e... → 2026-06-29 (11b59e5041af..., ~4017
@@ -47,7 +68,18 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # same five members under snort3-community-rules/ -- rather than copying
 # the SHA the failed build printed. The two agreed. Blocked the release
 # cut that was validating the rotated signing leaf; the weekly canary did
-# NOT flag it, having last run 2026-08-17 before Talos republished).
+# NOT flag it, having last run 2026-08-17 before Talos republished)
+# -> 89b9b94cf3a6... (a Talos weekly republish; re-pinned in the commit
+# preceding the 2026.08.4 stable, per agent-version.txt's dev.130 entry --
+# recorded here late, from that changelog rather than first-hand)
+# -> 1df6500c9dd9... (2026-09-10, 4017 active rules, Talos republished
+# 2026-09-08; re-fetched over HTTPS and the five-member tarball structure
+# confirmed before pinning, rather than copying the SHA a failed run
+# printed. The canary had been FAILING at this step since 2026-09-07
+# rather than filing a drift issue -- it dies on the mismatch before
+# reaching the code that opens the issue -- so two weeks of silence read
+# as "no drift". That is what REPORT_DRIFT below now fixes: the detector
+# reports a stale pin instead of being taken down by one).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
 PINNED_SHA="1df6500c9dd904c49104a27d43e671022227e476f736c78c45303455a0cd9f0a"
@@ -59,7 +91,13 @@ STAMP_FILE="$STAGE_DIR/.snort3-community-stamp"
 TMP_TAR="$(mktemp -t snort3-community.tar.gz.XXXXXX)"
 trap 'rm -f "$TMP_TAR"' EXIT
 
-if [ "${FORCE:-0}" != "1" ] && [ -f "$STAMP_FILE" ]; then
+# REPORT_DRIFT implies FORCE. The idempotent skip below answers "is what is on
+# disk what we pinned?", which is not the question the canary is asking — it
+# wants to know whether UPSTREAM still matches the pin, and that needs a fetch.
+# A stamp left behind by an earlier run would otherwise let the detector skip
+# the download and report "no drift" without having looked, which is the same
+# silent blind spot this flag was added to close.
+if [ "${FORCE:-0}" != "1" ] && [ "${REPORT_DRIFT:-0}" != "1" ] && [ -f "$STAMP_FILE" ]; then
 	if [ "$(cat "$STAMP_FILE")" = "$PINNED_SHA" ]; then
 		echo "snort rules already at $PINNED_SHA (stamp matches); skipping"
 		exit 0
@@ -71,14 +109,30 @@ echo "fetching $RULES_URL"
 curl -fsSL --retry 3 --retry-delay 2 -o "$TMP_TAR" "$RULES_URL"
 
 actual_sha=$(sha256sum "$TMP_TAR" | awk '{print $1}')
+rules_drift=false
 if [ "$actual_sha" != "$PINNED_SHA" ]; then
-	echo "::error::Snort3 Community Rules tarball SHA mismatch" >&2
-	echo "  expected: $PINNED_SHA" >&2
-	echo "  actual:   $actual_sha" >&2
-	echo "If the upstream ruleset moved on intentionally, update PINNED_SHA in this script." >&2
-	exit 1
+	if [ "${REPORT_DRIFT:-0}" = "1" ]; then
+		# Findings go to stdout, not stderr, and as ::warning:: rather than
+		# ::error:: — an ::error:: annotation on a run that deliberately
+		# succeeded reads as a broken canary, which is exactly the confusion
+		# this whole change is undoing.
+		rules_drift=true
+		echo "::warning::Snort3 Community Rules pin is stale — upstream tarball SHA no longer matches PINNED_SHA"
+		echo "  pinned:   $PINNED_SHA"
+		echo "  upstream: $actual_sha"
+		echo "REPORT_DRIFT=1: staging the tarball as downloaded and continuing, so the"
+		echo "drift-detection build still produces a package manifest to diff. This is a"
+		echo "measurement, NOT a releasable image — the rules in it are unverified."
+	else
+		echo "::error::Snort3 Community Rules tarball SHA mismatch" >&2
+		echo "  expected: $PINNED_SHA" >&2
+		echo "  actual:   $actual_sha" >&2
+		echo "If the upstream ruleset moved on intentionally, update PINNED_SHA in this script." >&2
+		exit 1
+	fi
+else
+	echo "sha256 verified: $actual_sha"
 fi
-echo "sha256 verified: $actual_sha"
 
 # Wipe any prior build-fetched content and reseed.
 rm -rf "$RULES_DIR"
@@ -103,6 +157,27 @@ if [ ! -s "$RULES_DIR/snort3-community.rules" ]; then
 	exit 1
 fi
 
-echo "$PINNED_SHA" > "$STAMP_FILE"
+# The stamp records what is ACTUALLY staged, not what we wanted. On the default
+# path those are the same value — a mismatch has already exited 1 by here — so
+# this writes exactly what it always did. Under REPORT_DRIFT they differ, and
+# writing the pin instead would be a lie with teeth: the next default-mode run
+# would see stamp == PINNED_SHA, take the idempotent skip at the top of this
+# script, and hand a release build drifted rules while reporting them verified.
+echo "$actual_sha" > "$STAMP_FILE"
 rule_count=$(grep -cE '^(alert|drop|block|reject)' "$RULES_DIR/snort3-community.rules" || true)
 echo "staged 1 rule file (~$rule_count rules) into $RULES_DIR"
+
+# Machine-readable signal, report mode only. GitHub reads $GITHUB_OUTPUT back as
+# the step's outputs, which is how canary.yml's "Decide whether to open an issue"
+# and "Build issue body" steps see this finding without re-parsing our stdout —
+# the same mechanism every other reporting step in that workflow already uses.
+# Outside Actions the variable is unset and this is a no-op; setting it by hand
+# is also how you exercise this path locally:
+#   GITHUB_OUTPUT=/tmp/out REPORT_DRIFT=1 ./scripts/fetch-snort-rules.sh
+if [ "${REPORT_DRIFT:-0}" = "1" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+	{
+		echo "rules_drift=$rules_drift"
+		echo "rules_pinned_sha=$PINNED_SHA"
+		echo "rules_actual_sha=$actual_sha"
+	} >> "$GITHUB_OUTPUT"
+fi
