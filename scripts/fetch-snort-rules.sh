@@ -50,7 +50,7 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # NOT flag it, having last run 2026-08-17 before Talos republished).
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="89b9b94cf3a6e4be72b5cb952d666e50714c6d5616e03f85d63d253d9424f26c"
+PINNED_SHA="1df6500c9dd904c49104a27d43e671022227e476f736c78c45303455a0cd9f0a"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
