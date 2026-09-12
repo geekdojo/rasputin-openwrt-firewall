@@ -10,7 +10,8 @@
 # firewall build that pins it — the build downloads it by URL.
 #
 # Format: lines starting with `#` and blank lines are ignored; the first
-# remaining line is the bare semver (no leading `v`).
+# remaining line is the bare CalVer version, YYYY.MM.MICRO with an optional
+# -dev.N suffix (no leading `v`).
 #
 # Changelog (why each bump):
 #   v0.2.0 (2026-06-08): IDS subsystem — snort3 alert_fast tailer + NATS publish

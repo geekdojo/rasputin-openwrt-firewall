@@ -136,10 +136,12 @@ jobs:
       # api/agent pairs nobody tests, and it withholds agent fixes from the one
       # node type sitting on the WAN edge.
       #
-      # Stable: the pin must equal the tag exactly.
-      # Dev:    the pin's BASE must match, but dev.N may differ — the two repos
-      #         have independent run counters, so agent 2026.07.9-dev.79 inside
-      #         firewall 2026.07.9-dev.12 is correct, not drift.
+      # Stable: the pin must equal the tag exactly (hard gate, exit 1).
+      # Dev:    the pin is NOT required to match. dev.N always differs — the two
+      #         repos have independent run counters, so agent 2026.07.9-dev.79
+      #         inside firewall 2026.07.9-dev.12 is correct, not drift — and a
+      #         differing BASE only prints a ::warning:: and the build proceeds.
+      #         See the DEV branch below for why.
       - name: Validate pinned agent vs release version
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -216,7 +218,7 @@ jobs:
           # Pinned agent version — SINGLE SOURCE OF TRUTH is ./agent-version.txt
           # (shared with canary.yml so the two can't drift). Bump there, with a
           # changelog entry; the version must already be published on the
-          # control-plane repo. First non-comment line = the bare semver.
+          # control-plane repo. First non-comment line = the bare CalVer version.
           VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
           [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
           echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
