@@ -400,4 +400,22 @@
 #                        then-stale Snort pin, since re-pinned to b68a24f2, so the feed
 #                        delta for this build is not yet measured -- read it from the
 #                        build's SBOM. OpenWrt base stays 25.12.5.
-2026.09.0-dev.154
+#   2026.09.0 (2026-09-13): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned from the dev.154 prerelease to the CP STABLE
+#                        2026.09.0, per the dev.154 note above ("the next stable
+#                        re-pins to the bare 2026.09.0"). NO functional agent change
+#                        vs dev.154: v2026.09.0 is tagged on the same CP commit
+#                        (bf61895). The tarball sha256 differs because the build
+#                        stamps the version into the binary (-X main.AgentVersion).
+#                        The firewall-path change this stable ships is the dev.154
+#                        entry above (#289, the dnsmasq forward restart), on top of
+#                        2026.08.5; dev.108 (cc52ab4, agent dev.154) is the firewall
+#                        build validated on the bench for this stable.
+#                        Rebuild content per the SBOMs, dev.108 vs 2026.08.5: the LuCI
+#                        stack 26.251 -> 26.255, and ucode / libucode + ucode-mod-*
+#                        2026.01.16 r1 -> r2. Nothing else. The stable tag rebuilds
+#                        against the rolling feed, so read its own SBOM for any later
+#                        delta. Snort community rules unchanged at b68a24f2 (still
+#                        the live tarball, Last-Modified 2026-09-10 11:54 UTC).
+#                        OpenWrt base stays 25.12.5.
+2026.09.0
