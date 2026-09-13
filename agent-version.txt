@@ -365,4 +365,39 @@
 #                        update succeeding at all.
 #                        Not staged: the downside path above -- a trial boot whose agent
 #                        cannot reach the bus.
-2026.08.5
+#   2026.09.0-dev.154 (2026-09-13): DEV pin -- bench pin for the 2026.09.0 lockstep
+#                        stable; the next stable re-pins to the bare 2026.09.0. Built
+#                        from CP bf61895, which carries #289 and #290.
+#                        FUNCTIONAL agent change on this path, and the reason to move:
+#                          - #289 (0a023b5, brain#436): a changed dnsmasq forward
+#                            (server=/<cluster>.internal/<cp ip> and rebind-domain-ok=)
+#                            now RESTARTS dnsmasq instead of reloading it. reload sends
+#                            SIGHUP, which never re-reads either option, and the ujail
+#                            bind-mount keeps the old config inode, so on e12bench the
+#                            running dnsmasq kept forwarding to cp-1's previous address
+#                            until a manual restart while drift read UCI and reported in
+#                            sync. Apply now verifies dnsmasq's own startup log lines
+#                            (logread -f); drift reports in sync only when UCI has the
+#                            forward, the last restart verified, and the running dnsmasq
+#                            answers the zone apex with the forward's target; an
+#                            unverified restart is retried on the next apply. Nothing
+#                            restarts when the forward is unchanged; a changed forward
+#                            costs about a second of DNS.
+#                          - The agent's firewall.apply handler timeout goes 5s -> 30s.
+#                            The api's push step is still 5s (brain#433), so a slow
+#                            forward-changing apply can be recorded failed on the api
+#                            though it landed. Watch for that on the bench.
+#                        Read, not assumed, from the 2026.08.5..dev.154 agent + proto delta:
+#                          - agent/internal/openwrt: #289 only.
+#                          - agent/internal/docker (app upgrade, volume gates, pull
+#                            split): role-gated, inert here -- this box runs no apps.
+#                          - proto: new app/volume verbs and min-version entries
+#                            (api-side gating); proto/updates.go is comment-only.
+#                          - No agent go.mod change.
+#                        #290 is UI-only.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open; the last canary run (2026-09-07) failed on the
+#                        then-stale Snort pin, since re-pinned to b68a24f2, so the feed
+#                        delta for this build is not yet measured -- read it from the
+#                        build's SBOM. OpenWrt base stays 25.12.5.
+2026.09.0-dev.154
