@@ -1,0 +1,12 @@
+# gitleaks false positives (geekdojo/geekdojo-brain#105).
+#
+# Each fingerprint is commit:file:rule:line and silences exactly one finding in
+# one commit; the same text added again in a new commit is a new finding. Every
+# entry is preceded by the reason it was judged a false positive. Add entries
+# only after verifying the value is not a credential. Never disable a rule.
+
+# generic-api-key in scripts/validate-files.sh:7 — false match: the words are the uci-defaults script name 97-rasputin-disable-ipv6 in a header comment
+26c8b7b31dd803c2e8113a5f20be05884eccb1e1:scripts/validate-files.sh:generic-api-key:7
+
+# generic-api-key in scripts/test-seed-scrub.sh:57 — revoked: e3bench join token, bench decommissioned (Bryce 2026-09-14); removed from HEAD in #41
+37af16f1871662eba4c1a55e786d2cc657eb5c2f:scripts/test-seed-scrub.sh:generic-api-key:57
