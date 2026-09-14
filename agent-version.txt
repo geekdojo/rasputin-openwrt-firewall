@@ -418,4 +418,29 @@
 #                        delta. Snort community rules unchanged at b68a24f2 (still
 #                        the live tarball, Last-Modified 2026-09-10 11:54 UTC).
 #                        OpenWrt base stays 25.12.5.
-2026.09.0
+#   2026.09.1 (2026-09-14): STABLE, lockstep across control-plane / os / firewall.
+#                        Agent re-pinned from the 2026.09.0 stable to the CP STABLE
+#                        2026.09.1. The firewall never took a 2026.09.1 dev build, so
+#                        there is no dev.N prerelease between; v2026.09.1 is tagged on
+#                        the same CP commit as the dev.156 prerelease (55a23e3) that
+#                        the OS dev.212 image vendors and the bench validated.
+#                        NO functional agent change for this box. Read, not assumed,
+#                        from the v2026.09.0..v2026.09.1 agent + proto delta:
+#                          - agent/internal/storage (protect.go, mock.go): #293, which
+#                            corrects the reason text for a protected boot disk. The
+#                            storage backend is registered on controlplane and storage
+#                            roles only (agent/cmd/rasputin-agent/main.go), so it is
+#                            inert here.
+#                          - No agent/internal/openwrt change, no proto change, no
+#                            agent go.mod change.
+#                        The rest of #293 is api + UI. The tarball sha256 differs from
+#                        2026.09.0 because the build stamps the version into the
+#                        binary (-X main.AgentVersion).
+#                        Rebuild payload on top: the ImageBuilder feed refresh since the
+#                        2026.09.0 tag build (2026-09-13). Not measured ahead of the tag:
+#                        no firewall build has run since, no canary issue is open, and
+#                        the last canary run (2026-09-07) predates the Snort re-pin --
+#                        read the delta from the 2026.09.1 tag build's SBOM. Snort
+#                        community rules unchanged at b68a24f2 (still the live tarball,
+#                        Last-Modified 2026-09-10 11:54 UTC). OpenWrt base stays 25.12.5.
+2026.09.1
