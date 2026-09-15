@@ -61,6 +61,8 @@ jobs:
       # same reason as the scrub test below. (geekdojo/geekdojo-brain#441)
       - name: Node-id helper tests
         timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-node-id.sh
 
       # Same reasoning as the static checks above: run the identical behavioural

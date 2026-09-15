@@ -14,8 +14,9 @@
 #   The helpers run under busybox ash on the box. Every case is executed under
 #   each shell listed in TEST_SHELLS (default: whichever of sh, dash, bash and
 #   `busybox sh` are installed), so a construct one shell reads differently
-#   fails here rather than on hardware. CI runs dash (as sh) and bash; a
-#   developer can add busybox by running this inside an Alpine container.
+#   fails here rather than on hardware. REQUIRE_BUSYBOX=1 (CI sets it; the
+#   hosted runner ships busybox) turns a missing busybox into a failure, so the
+#   target shell cannot silently drop out of the run.
 #
 # Usage: sh scripts/test-node-id.sh
 set -u
@@ -150,6 +151,14 @@ if [ -z "$TEST_SHELLS" ]; then
 	echo "node-id: no shell found to test under" >&2
 	exit 1
 fi
+case " $TEST_SHELLS " in
+	*" busybox_sh "*) ;;
+	*)
+		if [ "${REQUIRE_BUSYBOX:-0}" = "1" ]; then
+			echo "node-id: REQUIRE_BUSYBOX=1 but busybox is not installed — the target shell was not tested" >&2
+			exit 1
+		fi ;;
+esac
 if [ "$fail" -eq 0 ]; then
 	echo "node-id: $pass check(s) passed"
 	exit 0

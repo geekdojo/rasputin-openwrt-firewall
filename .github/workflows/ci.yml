@@ -56,10 +56,13 @@ jobs:
       # The node id is the username the agent presents to the bus, and the
       # control plane accepts only a DNS label. An id that breaks the rule
       # builds, boots and passes every check above — the box just never joins —
-      # so the derivation and the check are table-tested, under dash and bash.
-      # (geekdojo/geekdojo-brain#441)
+      # so the derivation and the check are table-tested under dash, bash and
+      # busybox ash (the box's shell; REQUIRE_BUSYBOX fails the step if the
+      # runner ever stops shipping it). (geekdojo/geekdojo-brain#441)
       - name: Node-id helper tests
         timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-node-id.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
