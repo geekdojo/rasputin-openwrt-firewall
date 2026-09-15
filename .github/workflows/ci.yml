@@ -18,6 +18,8 @@
 ##   than inline steps: this repo has already been bitten by the same configuration
 ##   living in two workflows and drifting out of sync (the agent-version.txt pin), and a
 ##   check that disagrees with itself is worse than no check.
+##   Plus the behavioural tests release.yml's validate job also runs:
+##   scripts/test-node-id.sh and scripts/test-seed-scrub.sh.
 ##
 ## PERMISSIONS
 ##   Read-only. This workflow never publishes, tags, or touches a release; it has no
@@ -50,6 +52,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax, executable modes, and required paths
         run: ./scripts/validate-files.sh
+
+      # The node id is the username the agent presents to the bus, and the
+      # control plane accepts only a DNS label. An id that breaks the rule
+      # builds, boots and passes every check above — the box just never joins —
+      # so the derivation and the check are table-tested under dash, bash and
+      # busybox ash (the box's shell; REQUIRE_BUSYBOX fails the step if the
+      # runner ever stops shipping it). (geekdojo/geekdojo-brain#441)
+      - name: Node-id helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-node-id.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
       # provisioning, where uci-defaults self-delete and there is no second
