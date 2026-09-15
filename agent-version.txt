@@ -443,4 +443,29 @@
 #                        read the delta from the 2026.09.1 tag build's SBOM. Snort
 #                        community rules unchanged at b68a24f2 (still the live tarball,
 #                        Last-Modified 2026-09-10 11:54 UTC). OpenWrt base stays 25.12.5.
-2026.09.1
+#   2026.09.2-dev.159 (2026-09-15): DEV pin -- bench pin for the node id validation and
+#                        bus identity hardening batch; the next stable re-pins to the
+#                        bare 2026.09.2. Built from CP 6d8903a, which carries #301-#311
+#                        on top of dev.158 (#294-#300).
+#                        NO functional agent code change for this box. The hardening is
+#                        api / bus-auth / inventory / mesh side (#303, #304, #305, #308)
+#                        plus the updater (#310) and UI; it requires node ids to be DNS
+#                        labels, which this image's own #43 (seed-side node id
+#                        derivation and validation, already on main) provides.
+#                        Read, not assumed, from the v2026.09.1..6d8903a agent + proto delta:
+#                          - agent go.mod / go.sum only: golang.org/x/net 0.57.0 ->
+#                            0.59.0, golang.org/x/sys 0.47.0 -> 0.48.0, golang.org/x/crypto
+#                            (indirect) 0.55.0 -> 0.57.0 (#294, #299).
+#                          - backupxfer/fsat: comment-only.
+#                          - No agent/ source change, no proto, artifactsig or
+#                            tileschema change.
+#                        The tarball sha256 differs from 2026.09.1 because of the module
+#                        bumps and the version stamp (-X main.AgentVersion).
+#                        Rebuild payload on top: #43 and the ImageBuilder feed refresh.
+#                        No canary issue is open; the last canary run (2026-09-14)
+#                        passed, so read the feed delta from this build's SBOM. Snort
+#                        community rules: the pin b68a24f2 is STALE -- Talos republished
+#                        (live tarball 5a388fa7, Last-Modified 2026-09-15 13:34 UTC), so
+#                        the release build's rules fetch fails until PINNED_SHA is
+#                        re-pinned. OpenWrt base stays 25.12.5.
+2026.09.2-dev.159
