@@ -79,45 +79,46 @@ EOF
 	fi
 fi
 
-# Pick a stable per-box node_id. DMI fields are the right thing IF the
-# board vendor actually filled them in; many cheap N100 boards (including
-# the CWWK x86-p5-n100 reference Node N) leave them at AMI placeholder
-# strings like "Default string" or "To Be Filled By O.E.M.", which would
-# give every box the same node_id — useless for identity. We walk a few
-# DMI sources in priority order, skip known placeholders, and fall
-# through to /etc/machine-id (a per-install UUID — stable across reboots,
-# regenerates on a re-flash, which is the right semantics).
+# --- node id ---------------------------------------------------------------
+# The id is the NATS username the agent presents to the bus, and the control
+# plane accepts only a DNS label: 1-63 characters of a-z, 0-9 and '-', not
+# starting or ending with '-'. The helpers and the reasoning behind the two
+# behaviours below live in node-id.sh.
+# shellcheck source=/dev/null
+. /usr/lib/rasputin/node-id.sh
+
 # A provisioning matched set ASSIGNS the node id in the seed and binds the
 # join token to it (token-provisioning-pipeline.md §3) — so a seed-provided id
 # wins over the on-box derivation, otherwise the bound token wouldn't match.
 # Hand-flashed / un-provisioned boxes (blank seed id) still self-derive below.
-NODE_ID="${RASPUTIN_NODE_ID:-}"
-if [ -z "$NODE_ID" ]; then
-	for src in /sys/class/dmi/id/board_serial \
-	           /sys/class/dmi/id/product_serial \
-	           /sys/class/dmi/id/chassis_serial; do
-		[ -f "$src" ] || continue
-		# Trim trailing newline + leading/trailing whitespace; collapse internal
-		# whitespace runs (sometimes seen in vendor strings).
-		candidate=$(awk '{$1=$1; print}' "$src" 2>/dev/null)
-		case "$candidate" in
-			"" | \
-			"Default string" | \
-			"To Be Filled By O.E.M." | \
-			"To be filled by O.E.M." | \
-			"System Serial Number" | \
-			"Not Specified" | \
-			"Not Applicable" | \
-			"None" | \
-			"O.E.M." | \
-			"OEM" | \
-			"0123456789")
-				continue ;;
-			*)
-				NODE_ID="$candidate"
-				break ;;
-		esac
-	done
+#
+# A seed id is lowercased and trimmed, exactly as rasputin-provision does, and
+# then must already be valid. It is NOT rewritten into something valid: the
+# token is bound to the id the operator chose, so a substituted id could never
+# join and would hide why. Fail instead — before /etc/config/rasputin is
+# touched, so a box that was already provisioned keeps its working config and
+# a fresh one stays unprovisioned (99-rasputin then also leaves the token on
+# the seed FAT). The SSH key above has already been applied on purpose: it is
+# how the operator gets in to read this and fix the seed.
+NODE_ID=$(rasputin_label_canon "${RASPUTIN_NODE_ID:-}")
+if [ -n "$NODE_ID" ]; then
+	if ! rasputin_label_valid "$NODE_ID"; then
+		for msg in \
+			"apply-seed: ERROR: RASPUTIN_NODE_ID '$RASPUTIN_NODE_ID' in $SEED is not a valid node id." \
+			"apply-seed: a node id must be 1-63 characters of a-z, 0-9 and -, and must not start or end with -." \
+			"apply-seed: nothing was applied. Fix RASPUTIN_NODE_ID in $SEED (it must match the id the join token was issued for) and run /usr/lib/rasputin/apply-seed again."
+		do
+			logger -t rasputin "$msg"
+			printf '%s\n' "$msg" >&2
+		done
+		exit 1
+	fi
+else
+	# Pick a stable per-box node_id. DMI serials are the right thing IF the
+	# board vendor actually filled them in; rasputin_dmi_node_id skips the
+	# placeholder strings many boards ship and normalizes a real serial into a
+	# valid id (vendor serials are often uppercase and may contain spaces).
+	NODE_ID=$(rasputin_dmi_node_id)
 	# DMI didn't give us anything usable. Fall through to a persistent UUID
 	# we manage ourselves at /etc/rasputin/node-id. OpenWrt doesn't ship
 	# /etc/machine-id (that's a systemd convention; OpenWrt uses procd).
@@ -127,7 +128,8 @@ if [ -z "$NODE_ID" ]; then
 	# wiped). That's exactly the identity semantics we want — same box +
 	# same install = same node_id; different box OR fresh re-flash = new
 	# identity. The kernel's /proc/sys/kernel/random/uuid gives us a v4 UUID
-	# without a userspace tool dependency.
+	# without a userspace tool dependency — already a valid id; normalizing
+	# it too keeps the derived path valid by construction.
 	NODE_ID_FILE=/etc/rasputin/node-id
 	if [ -z "$NODE_ID" ]; then
 		if [ ! -s "$NODE_ID_FILE" ]; then
@@ -135,7 +137,7 @@ if [ -z "$NODE_ID" ]; then
 			cat /proc/sys/kernel/random/uuid > "$NODE_ID_FILE" 2>/dev/null || true
 			chmod 0644 "$NODE_ID_FILE" 2>/dev/null || true
 		fi
-		NODE_ID=$(cat "$NODE_ID_FILE" 2>/dev/null || true)
+		NODE_ID=$(rasputin_label_normalize "$(cat "$NODE_ID_FILE" 2>/dev/null || true)")
 	fi
 fi
 # Belt-and-suspenders for the (vanishingly unlikely) case where even the

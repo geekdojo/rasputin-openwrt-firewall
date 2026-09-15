@@ -57,6 +57,12 @@ jobs:
       - name: Validate shipped files
         run: ./scripts/validate-files.sh
 
+      # The node-id table tests ci.yml runs on every PR, run again here for the
+      # same reason as the scrub test below. (geekdojo/geekdojo-brain#441)
+      - name: Node-id helper tests
+        timeout-minutes: 5
+        run: sh scripts/test-node-id.sh
+
       # Same reasoning as the static checks above: run the identical behavioural
       # test a PR faced, at the point a finding is most expensive to discover.
       # The seed scrub blanks a credential during first-boot provisioning, and
