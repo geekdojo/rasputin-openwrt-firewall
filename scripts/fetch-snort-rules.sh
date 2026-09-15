@@ -88,9 +88,16 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # gzip header reads 2026-09-09 21:20 UTC; that is when Talos built the
 # archive, not when it went live, so don't date a republish from it. Weekly
 # is Talos's usual rhythm, not a promise).
+# -> 5a388fa78203... (2026-09-15, 4017 active rules; verified before
+# pinning: two separate HTTPS downloads hashed identical, the five-member
+# tarball structure and rule count unchanged). It went live on snort.org at
+# 13:34 UTC (the S3 object's Last-Modified); its gzip header reads
+# 2026-09-14 19:14 UTC, the archive build time. Found while preparing the
+# 2026.09.2-dev.159 agent pin, before any build failed on it; re-pinned in
+# the same PR.
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="b68a24f265ff3bde8e2f9bcd0474b7f19e896428933d963cd28dfeba4c9b84ed"
+PINNED_SHA="5a388fa782031148981f3563eba906f019520ebfc130c04747f166c69caae4cd"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
