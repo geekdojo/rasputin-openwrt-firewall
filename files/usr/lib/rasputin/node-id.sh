@@ -10,9 +10,11 @@
 # has to satisfy it or the node cannot join.
 #
 # Two kinds of id, two behaviours:
-#   - DERIVED here (DMI serial): rasputin_label_normalize bends the raw string
-#     into a valid label, deterministically, so the same box always derives the
-#     same id.
+#   - DERIVED here (DMI serial, else a persistent UUID) ONLY for a seed with no
+#     join token: rasputin_label_normalize bends the raw string into a valid
+#     label, deterministically, so the same box always derives the same id. A
+#     seed WITH a token must supply the id — apply-seed refuses it otherwise,
+#     because the token is bound to one id (geekdojo/geekdojo-brain#423).
 #   - SUPPLIED by an operator (RASPUTIN_NODE_ID in the seed): the join token is
 #     bound to the id they chose, so it is only lowercased and trimmed
 #     (rasputin_label_canon, as rasputin-provision does) and then CHECKED with
