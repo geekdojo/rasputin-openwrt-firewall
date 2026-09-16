@@ -157,17 +157,18 @@ disabled, so there is nothing to scp *to* until the seed lands your key.
 
 ```sh
 RASPUTIN_NODE_ROLE=firewall
-RASPUTIN_NODE_ID=fw-1                 # required with a token; the id the token was issued for
+RASPUTIN_NODE_ID=fw-1                 # required; the id the control plane assigned (the token is bound to it)
 RASPUTIN_NATS_URL=nats://rasputin.local:4222
 RASPUTIN_CP_JOIN_TOKEN=...            # minted by the controlplane
 RASPUTIN_SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop"  # optional; quote it — your SSH key
 RASPUTIN_BUS_PIN=sha256/...           # the controlplane's bus key pin; unquoted
 ```
 
-A join token is bound to one node id, so a seed with `RASPUTIN_CP_JOIN_TOKEN`
-must carry `RASPUTIN_NODE_ID` too: without it `apply-seed` stops and applies
-nothing, with the reason in `logread`, rather than derive an id the token would
-not match. The Add-node flow and `rasputin-provision` always write both.
+Every seed must carry `RASPUTIN_NODE_ID`: the control plane assigns it and
+binds the join token to it, and the box never makes one up. A seed with a NATS
+URL or join token but no node id makes `apply-seed` stop and apply nothing, with
+the reason in `logread`. The Add-node flow and `rasputin-provision` always
+write it.
 
 `RASPUTIN_BUS_PIN` makes the agent dial the bus over TLS and accept only the
 controlplane key it names. It is public, the controlplane puts it in every
@@ -184,7 +185,9 @@ On first boot the uci-defaults one-shots harden SSH to key-only, stage the
 ESP seed (if present), assign WAN/LAN ports (eth1 = WAN, eth0 = LAN on the
 reference hardware), enable nftables flow offload, start the agent, and
 sync the seed into UCI. Re-run `/usr/lib/rasputin/apply-seed` any time the
-seed changes; if the seed is blank the agent simply waits. Enrollment is
+seed changes. With no seed yet (no node id, NATS URL or join token)
+`apply-seed` writes nothing and the agent does not start; it never runs
+without a node id. Enrollment is
 normally driven from the control plane's Add-node flow.
 
 ## Releases

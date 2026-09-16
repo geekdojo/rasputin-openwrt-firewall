@@ -3,7 +3,7 @@
 # sysupgrade-preserve.sh — orchestrator-side wrapper around `sysupgrade -F`
 # that survives the partition-layout-change "Full image will be written"
 # path, which bypasses /lib/upgrade/keep.d/* entirely and wipes
-# /etc/rasputin/ (seed.env, node-id, trust/root-ca.pem) + /etc/dropbear/
+# /etc/rasputin/ (seed.env, trust/root-ca.pem) + /etc/dropbear/
 # (SSH host keys).
 #
 # Background:
@@ -199,7 +199,7 @@ sleep 3
 
 log "verifying SSH back to firewall with the ORIGINAL host keys ($KNOWN_HOSTS_MAIN)"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS_MAIN" \
-	"$SSH_TARGET" 'cat /etc/rasputin/node-id 2>/dev/null; cat /etc/openwrt_release | head -2' 2>/dev/null; then
+	"$SSH_TARGET" 'uci -q get rasputin.main.node_id; cat /etc/openwrt_release | head -2' 2>/dev/null; then
 	log "host-key restore confirmed — original known_hosts matches"
 else
 	log "WARNING: main known_hosts mismatch after restore — dropbear may not have reloaded the saved keys"

@@ -10,8 +10,10 @@
 #   1. WAN/LAN port assignment for the i226-V dual NIC (eth1=WAN, eth0=LAN).
 #   2. nftables software flowtable offload.
 #   3. Calls /usr/lib/rasputin/apply-seed to read /etc/rasputin/seed.env
-#      (if present) and write /etc/config/rasputin. Blank seed is fine —
-#      the agent polls and waits.
+#      (if present) and write /etc/config/rasputin. No seed yet is fine —
+#      apply-seed writes nothing and the agent does not start until a seed
+#      with a node id is applied. A seed with a NATS URL or join token but
+#      no node id fails apply-seed (logged; this script carries on).
 #   4. Enables the rasputin-agent service.
 #
 # Always exits 0. Earlier versions of this script deferred (exit 1) when
@@ -81,7 +83,7 @@ add_list dhcp.@dnsmasq[0].addnhosts='/etc/rasputin/hosts'
 commit dhcp
 EOF
 
-# --- Apply seed (writes /etc/config/rasputin; blank values are OK) ---
+# --- Apply seed (writes /etc/config/rasputin; no seed yet is a no-op) ---
 if /usr/lib/rasputin/apply-seed; then
 	# The join token is now in /etc/config/rasputin, where the agent reads it,
 	# and in /etc/rasputin/seed.env on the overlay, which survives slot
