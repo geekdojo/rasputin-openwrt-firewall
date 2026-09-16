@@ -468,4 +468,17 @@
 #                        5a388fa7 (Talos republish, Last-Modified 2026-09-15 13:34 UTC;
 #                        4017 active rules, five-member tarball unchanged). OpenWrt
 #                        base stays 25.12.5.
-2026.09.2-dev.159
+#   2026.09.2 (2026-09-15): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-pinned from the 2026.09.2-dev.159 prerelease to the CP
+#                        STABLE v2026.09.2.
+#                        NO functional agent change: the diff from dev.159 to the
+#                        stable tag touches zero files under agent/, proto/,
+#                        artifactsig/ or tileschema/ -- it is the /trust page's
+#                        Windows certificate fix (api + ui) plus fuzz harnesses.
+#                        The tarball sha256 still differs from dev.159 because of the
+#                        version stamp (-X main.AgentVersion).
+#                        OpenWrt feed delta: this commit changes no package pin, but
+#                        the rebuild pulls the rolling feed, so read the actual delta
+#                        from THIS build's SBOM. Last canary run 2026-09-14 passed and
+#                        no canary issue is open.
+2026.09.2
