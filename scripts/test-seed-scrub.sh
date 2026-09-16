@@ -37,6 +37,10 @@ cd "$(dirname "$0")/.." || exit 2
 SCRUB="$PWD/files/usr/lib/rasputin/scrub-seed-token"
 LOOKUP="$PWD/files/usr/lib/rasputin/seed-fat-device"
 TOKEN_KEY=RASPUTIN_CP_JOIN_TOKEN
+# The bus private key never belongs on a firewall and is blanked alongside the
+# token; the bus pin beside it is public and must survive untouched.
+# (geekdojo/geekdojo-brain#448)
+BUS_KEY=RASPUTIN_BUS_KEY
 
 fail=0
 pass=0
@@ -58,30 +62,36 @@ RASPUTIN_CP_JOIN_TOKEN=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefd
 RASPUTIN_SSH_AUTHORIZED_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILeTW4LbDBrabb+5c7TBQjtRUFS0B/516Q+s0tFfbQaI operator@mac
 RASPUTIN_NTP_SERVER=pool.ntp.org
 RASPUTIN_RELEASE_CHANNEL=dev#stable-later
+RASPUTIN_BUS_PIN=sha256/47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+RASPUTIN_BUS_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 SEED
 }
 
-# assert_scrubbed: the token's value is gone, and every OTHER line survived
-# byte for byte. The second half is the one that matters — a scrub that also
-# ate the SSH key would strand the operator with no way back into the box.
+# assert_scrubbed: the token's and the bus key's values are gone, and every
+# OTHER line survived byte for byte. The second half is the one that matters —
+# a scrub that also ate the SSH key would strand the operator with no way back
+# into the box, and one that ate the bus pin would quietly downgrade it.
 assert_scrubbed() {
-	local f="$1" label="$2" before="$3"
+	local f="$1" label="$2" before="$3" key
 
-	if grep -q "^${TOKEN_KEY}=$" "$f"; then
-		ok "$label: token blanked, key retained"
-	else
-		bad "$label: expected a bare '${TOKEN_KEY}=' line, got: $(grep "^${TOKEN_KEY}=" "$f" || echo '<no token line>')"
-	fi
-	if grep -q "^${TOKEN_KEY}=." "$f"; then
-		bad "$label: a token VALUE is still present"
-	fi
+	for key in "$TOKEN_KEY" "$BUS_KEY"; do
+		if grep -q "^${key}=$" "$f"; then
+			ok "$label: $key blanked, key retained"
+		else
+			bad "$label: expected a bare '${key}=' line, got: $(grep "^${key}=" "$f" || echo '<no line>')"
+		fi
+		if grep -q "^${key}=." "$f"; then
+			bad "$label: a $key VALUE is still present"
+		fi
+	done
 
 	local diff_out
-	diff_out=$(diff <(grep -v "^${TOKEN_KEY}=" "$before") <(grep -v "^${TOKEN_KEY}=" "$f") 2>&1)
+	diff_out=$(diff <(grep -v -e "^${TOKEN_KEY}=" -e "^${BUS_KEY}=" "$before") \
+		<(grep -v -e "^${TOKEN_KEY}=" -e "^${BUS_KEY}=" "$f") 2>&1)
 	if [ -z "$diff_out" ]; then
-		ok "$label: every other line byte-identical"
+		ok "$label: every other line byte-identical (bus pin included)"
 	else
-		bad "$label: non-token lines changed:"
+		bad "$label: non-secret lines changed:"
 		printf '%s\n' "$diff_out" | sed 's/^/      /' >&2
 	fi
 }
@@ -117,10 +127,21 @@ d="$TMP/both"; mkdir -p "$d"
 write_seed "$d/rasputin-seed.env"
 write_seed "$d/seed.env"
 run_scrub "$d"
-if grep -q "^${TOKEN_KEY}=." "$d/rasputin-seed.env" || grep -q "^${TOKEN_KEY}=." "$d/seed.env"; then
-	bad "a token survived when both seed names were present"
+if grep -q -e "^${TOKEN_KEY}=." -e "^${BUS_KEY}=." "$d/rasputin-seed.env" "$d/seed.env"; then
+	bad "a token or bus key survived when both seed names were present"
 else
 	ok "both seed filenames scrubbed"
+fi
+
+# --- a bus key with no token (a token already scrubbed, or never there): the
+#     key is still blanked on its own
+d="$TMP/keyonly"; mkdir -p "$d"
+printf 'RASPUTIN_NODE_ROLE=firewall\n%s=\n%s=c2VjcmV0\n' "$TOKEN_KEY" "$BUS_KEY" > "$d/seed.env"
+run_scrub "$d"
+if grep -q "^${BUS_KEY}=$" "$d/seed.env" && [ "$(wc -l < "$d/seed.env" | tr -d ' ')" -eq 3 ]; then
+	ok "bus key alone: blanked, line count unchanged"
+else
+	bad "bus key alone: got $(tr '\n' '|' < "$d/seed.env")"
 fi
 
 # --- nothing to do cases: these must be silent successes, never errors

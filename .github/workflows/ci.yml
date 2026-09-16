@@ -19,11 +19,14 @@
 ##   living in two workflows and drifting out of sync (the agent-version.txt pin), and a
 ##   check that disagrees with itself is worse than no check.
 ##   Plus the behavioural tests release.yml's validate job also runs:
-##   scripts/test-node-id.sh, scripts/test-seed-scrub.sh, scripts/test-snort-rules-pin.sh
-##   and scripts/test-release-tag-guard.sh.
+##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-seed-scrub.sh,
+##   scripts/test-snort-rules-pin.sh and scripts/test-release-tag-guard.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
+##   And the functional test of the seed -> UCI -> agent environment path
+##   (scripts/test-apply-seed.sh): this branch's files/ inside the latest stable
+##   image's userland, under chroot.
 ##
 ## PERMISSIONS
 ##   Read-only. This workflow never publishes, tags, or touches a release; it has no
@@ -68,6 +71,16 @@ jobs:
         env:
           REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-node-id.sh
+
+      # The bus pin check apply-seed runs on RASPUTIN_BUS_PIN must accept exactly
+      # what the agent accepts (geekdojo/geekdojo-brain#448): the agent's own
+      # refusal vectors, plus 64 pins computed with openssl and their
+      # non-canonical siblings, under dash, bash and busybox ash.
+      - name: Bus-pin helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-bus-pin.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
       # provisioning, where uci-defaults self-delete and there is no second
@@ -119,6 +132,37 @@ jobs:
       - name: Tag guard tests
         timeout-minutes: 5
         run: ./scripts/test-release-tag-guard.sh
+
+  apply-seed:
+    name: Seed to agent environment (functional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure unsquashfs and sfdisk are available
+        timeout-minutes: 5
+        run: |
+          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
+            echo "squashfs-tools + fdisk already present"
+            exit 0
+          fi
+          # Bounded: fail on a held lock instead of waiting forever.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+
+      # This branch's files/ over the latest stable image's rootfs, under chroot:
+      # the real busybox sources the seed, the real uci stores it, and the real
+      # init.d/rasputin-agent reads it back into the agent's environment (only
+      # procd's calls are stubbed). Covers the bus pin end to end, a malformed
+      # pin refused with nothing applied, RASPUTIN_BUS_KEY never applied and
+      # blanked, and sysupgrade's keep list carrying both pin locations.
+      # (geekdojo/geekdojo-brain#448)
+      - name: apply-seed functional test
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/test-apply-seed.sh
 
   snort-rules-check:
     name: Snort rules check (functional)

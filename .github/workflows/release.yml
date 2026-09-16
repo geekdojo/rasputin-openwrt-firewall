@@ -108,6 +108,14 @@ jobs:
           REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-node-id.sh
 
+      # The bus-pin table tests ci.yml runs on every PR, for the same reason.
+      # (geekdojo/geekdojo-brain#448)
+      - name: Bus-pin helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-bus-pin.sh
+
       # Same reasoning as the static checks above: run the identical behavioural
       # test a PR faced, at the point a finding is most expensive to discover.
       # The seed scrub blanks a credential during first-boot provisioning, and

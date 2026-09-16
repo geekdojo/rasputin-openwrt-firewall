@@ -11,6 +11,11 @@
 #
 # Idempotent. Blank values are valid — the agent polls and waits when
 # nats_url or join_token is empty.
+#
+# Exits 1, having applied nothing to /etc/config/rasputin, when the seed
+# carries a value that cannot be used as written: an invalid RASPUTIN_NODE_ID
+# or an invalid RASPUTIN_BUS_PIN. The SSH key is applied before either check
+# on purpose — it is how the operator gets in to fix the seed.
 
 set -eu
 
@@ -28,6 +33,14 @@ RASPUTIN_CLUSTER_ID=rasputin
 RASPUTIN_NATS_URL=
 RASPUTIN_CP_JOIN_TOKEN=
 RASPUTIN_SSH_AUTHORIZED_KEY=
+# The bus pin (geekdojo/geekdojo-brain#448): the hash of the controlplane's bus
+# key, which the agent checks the bus server's TLS key against. Public, so it
+# needs no scrubbing. Blank = the seed has no pin; see the bus pin section.
+RASPUTIN_BUS_PIN=
+# The bus PRIVATE key. Only ever meant for the controlplane's own seed; a
+# firewall never uses it. Defaulted here only so the check below can see
+# whether the seed carried one.
+RASPUTIN_BUS_KEY=
 
 if [ -f "$SEED" ]; then
 	# shellcheck disable=SC1090
@@ -36,6 +49,57 @@ if [ -f "$SEED" ]; then
 else
 	logger -t rasputin "apply-seed: $SEED not found; writing blank config (agent polls)"
 fi
+
+# shellcheck source=/dev/null
+. /usr/lib/rasputin/bus-pin.sh
+
+# --- bus private key: never on a firewall ------------------------------------
+# RASPUTIN_BUS_KEY belongs in the controlplane's seed and nowhere else
+# (docs/bus-tls-contract.md in rasputin-control-plane). Finding it here means a
+# controlplane seed, or a copy of one, was put on this box. Three choices, and
+# why this one:
+#   - Apply it: impossible and pointless. Nothing on a firewall serves the bus,
+#     the agent never reads the key from its environment, and the contract has
+#     no firewall destination for it.
+#   - Refuse the whole seed (exit 1): the key is already on this disk whatever
+#     we do, so refusing protects nothing — it only leaves the box
+#     unprovisioned, and leaves the key sitting in the seed.
+#   - Ignore it, say so loudly, and blank it from the staged seed: the box
+#     provisions, the secret stops sitting at rest in /etc/rasputin/seed.env
+#     (which is kept across sysupgrade and copied off-box by
+#     sysupgrade-preserve.sh), and the log names the mistake. This one.
+# It is never written to UCI and never reaches the agent: init.d/rasputin-agent
+# builds the agent's environment from UCI, not from this file. The copy on the
+# seed FAT is blanked with the join token by scrub-seed-token.
+if [ -n "$(rasputin_seed_trim "${RASPUTIN_BUS_KEY:-}")" ]; then
+	for msg in \
+		"apply-seed: WARNING: $SEED contains RASPUTIN_BUS_KEY, the controlplane's bus private key. A firewall never uses it, and it was not applied." \
+		"apply-seed: only the controlplane's own seed should carry RASPUTIN_BUS_KEY. Seeds for every other node carry RASPUTIN_BUS_PIN alone."
+	do
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+	done
+	# Rewrite to a temp file beside the seed and rename, so a failure leaves
+	# the old file whole. Then prove the key is gone by reading the result the
+	# same way this script read the original — by sourcing it, in a subshell.
+	# Never fails the apply: an unscrubbed key is a finding, not a reason to
+	# leave the box unprovisioned.
+	tmp="$SEED.tmp.$$"
+	# shellcheck source=/dev/null
+	if sed 's#^[[:space:]]*RASPUTIN_BUS_KEY=.*#RASPUTIN_BUS_KEY=#' "$SEED" > "$tmp" 2>/dev/null \
+		&& chmod 600 "$tmp" 2>/dev/null \
+		&& mv -f "$tmp" "$SEED" 2>/dev/null \
+		&& (RASPUTIN_BUS_KEY=; . "$SEED" >/dev/null 2>&1; [ -z "$(rasputin_seed_trim "${RASPUTIN_BUS_KEY:-}")" ])
+	then
+		msg="apply-seed: blanked RASPUTIN_BUS_KEY in $SEED"
+	else
+		rm -f "$tmp" 2>/dev/null || true
+		msg="apply-seed: WARNING: could not blank RASPUTIN_BUS_KEY in $SEED; remove that line by hand"
+	fi
+	logger -t rasputin "$msg"
+	printf '%s\n' "$msg" >&2
+fi
+RASPUTIN_BUS_KEY=
 
 # Seed-supplied SSH authorized key → /etc/dropbear/authorized_keys (the path
 # OpenWrt's dropbear reads natively; the overlay is writable, unlike the
@@ -77,6 +141,32 @@ EOF
 		/etc/init.d/dropbear reload 2>/dev/null || true
 		logger -t rasputin "apply-seed: dropbear hardened to key-only SSH (authorized key present)"
 	fi
+fi
+
+# --- bus pin ---------------------------------------------------------------
+# Trimmed of surrounding whitespace (a seed saved on Windows leaves a CR on
+# every value), then it must be exactly the form the agent accepts — see
+# bus-pin.sh. Nothing is rewritten into a valid pin: a pin is compared byte for
+# byte, and a "repaired" one is a different key.
+#
+# An invalid pin fails the apply before /etc/config/rasputin is touched, like
+# an invalid node id below. The agent's own fallback for a bad pin is to
+# report it and dial the bus in plaintext; applying the rest of this seed and
+# dropping the pin would provision the box into exactly that downgrade, which
+# is what the pin exists to prevent — and on a controlplane that already
+# requires TLS the box could then neither join nor be sent a pin. So stop here
+# and say why. A box that was already provisioned keeps its working config.
+BUS_PIN=$(rasputin_seed_trim "${RASPUTIN_BUS_PIN:-}")
+if [ -n "$BUS_PIN" ] && ! rasputin_bus_pin_valid "$BUS_PIN"; then
+	for msg in \
+		"apply-seed: ERROR: RASPUTIN_BUS_PIN '$BUS_PIN' in $SEED is not a valid bus pin." \
+		"apply-seed: a bus pin is sha256/ followed by 44 characters of standard base64 ending in =, 51 characters in all, exactly as the controlplane printed it." \
+		"apply-seed: nothing was applied. Copy RASPUTIN_BUS_PIN into $SEED again from the controlplane (Add node, or GET /api/bus/tls) and run /usr/lib/rasputin/apply-seed again."
+	do
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+	done
+	exit 1
 fi
 
 # --- node id ---------------------------------------------------------------
@@ -157,6 +247,23 @@ touch /etc/config/rasputin
 # the downstream `set` + `commit` never run. Just `set` directly; UCI
 # set semantics are "create or overwrite", so re-running apply-seed
 # stays idempotent.
+#
+# The bus pin is the one value a blank seed does NOT overwrite. With no pin in
+# the seed (an older seed, or a hand-written one) nothing is written, per the
+# contract, and a pin this box already holds in UCI stays. A pin is trust
+# material and the bus never takes one back (a node refuses a different pin
+# delivered over it), so a seed that merely predates pins must not quietly
+# downgrade a pinned box to plaintext. A seed with a DIFFERENT valid pin does
+# replace it: that is an operator re-seeding on purpose. To remove a pin by
+# hand: uci delete rasputin.main.bus_pin && uci commit rasputin.
+BUS_PIN_UCI=
+if [ -n "$BUS_PIN" ]; then
+	BUS_PIN_UCI="set rasputin.main.bus_pin='${BUS_PIN}'"
+	old_pin=$(uci -q get rasputin.main.bus_pin 2>/dev/null || true)
+	if [ -n "$old_pin" ] && [ "$old_pin" != "$BUS_PIN" ]; then
+		logger -t rasputin "apply-seed: replacing bus pin $old_pin with $BUS_PIN from $SEED"
+	fi
+fi
 uci -q batch <<EOF
 set rasputin.main='rasputin'
 set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
@@ -164,6 +271,7 @@ set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
 set rasputin.main.join_token='${RASPUTIN_CP_JOIN_TOKEN:-}'
 set rasputin.main.node_id='${NODE_ID}'
 set rasputin.main.cluster_id='${RASPUTIN_CLUSTER_ID:-rasputin}'
+${BUS_PIN_UCI}
 commit rasputin
 EOF
 
