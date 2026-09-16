@@ -19,7 +19,11 @@
 ##   living in two workflows and drifting out of sync (the agent-version.txt pin), and a
 ##   check that disagrees with itself is worse than no check.
 ##   Plus the behavioural tests release.yml's validate job also runs:
-##   scripts/test-node-id.sh and scripts/test-seed-scrub.sh.
+##   scripts/test-node-id.sh, scripts/test-seed-scrub.sh, scripts/test-snort-rules-pin.sh
+##   and scripts/test-release-tag-guard.sh.
+##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
+##   run against the latest stable image: release builds run that check on every image,
+##   so a regression in it must surface on the PR, not at release time.
 ##
 ## PERMISSIONS
 ##   Read-only. This workflow never publishes, tags, or touches a release; it has no
@@ -102,3 +106,43 @@ jobs:
         env:
           REQUIRE_FAT: "1"
         run: ./scripts/test-seed-scrub.sh
+
+      # The Snort rules pin (mirror fetch + SHA verification), the pre-flight
+      # freshness gate and its canary report mode, against fixture tarballs
+      # served locally. No network. (geekdojo/geekdojo-brain#208)
+      - name: Snort rules pin tests
+        timeout-minutes: 5
+        run: ./scripts/test-snort-rules-pin.sh
+
+      # The release tag guard's decision logic, against fixture Actions API
+      # responses, plus a check that release.yml still has the step it looks for.
+      - name: Tag guard tests
+        timeout-minutes: 5
+        run: ./scripts/test-release-tag-guard.sh
+
+  snort-rules-check:
+    name: Snort rules check (functional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure unsquashfs and sfdisk are available
+        timeout-minutes: 5
+        run: |
+          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
+            echo "squashfs-tools + fdisk already present"
+            exit 0
+          fi
+          # Bounded, as above: fail on a held lock instead of waiting forever.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+
+      # Runs the REAL rules check (extract rootfs-0, chroot, snort-mgr -v check)
+      # against the latest stable image: its own rules must pass; a broken rule,
+      # an empty ruleset and a missing partition must each fail.
+      - name: Rules check functional test
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/test-snort-rules-check.sh

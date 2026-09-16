@@ -20,6 +20,16 @@ name: release
 #       release base comes from the org var RASPUTIN_VERSION, shared with
 #       rasputin-os / -control-plane for lockstep. Implies full_build.
 #   - manual dispatch (full_build=false) → validate only (default, cheap)
+#
+# Tag builds need a PRE-FLIGHT first (geekdojo/geekdojo-brain#208):
+#   gh workflow run release.yml -f full_build=true --ref main
+# on the exact commit you are about to tag. Every dispatch build runs the Snort
+# rules freshness gate (upstream vs PINNED_SHA); tag builds do not, and instead
+# the tag-guard job refuses to start unless a dispatch run on the same commit
+# passed that gate. Upstream moving between the pre-flight and the tag cannot
+# change what the tag builds: all builds fetch the rules from the org mirror at
+# PINNED_SHA. So a Talos republish can fail a pre-flight — cheap, re-pin and
+# re-run — but never burn an immutable tag.
 
 on:
   push:
@@ -43,8 +53,41 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  validate:
+  # Runs on every trigger so `needs:` below never sees a skipped job; only tag
+  # builds do anything. Fails BEFORE validate/build, so a refused tag has built,
+  # signed and published nothing and can simply be re-run once the pre-flight is
+  # green — the tag itself is not burned.
+  tag-guard:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read   # list this workflow's runs, jobs and steps
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+      # A tag build must not be the first build of its commit. The freshness gate
+      # only runs on dispatch builds, so require a successful workflow_dispatch
+      # run of this workflow on the EXACT commit being tagged whose build job
+      # passed the "Snort rules freshness gate" step. The step is checked, not
+      # just the run: a validate-only dispatch also concludes success.
+      # 2026.09.2 was burned by a tag build that hit a Talos republish hours
+      # after a green dispatch build. (geekdojo/geekdojo-brain#208)
+      - name: Require a green pre-flight on this commit
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/rasputin-release-tag-guard.sh "$GITHUB_REPOSITORY" "$(git rev-parse 'HEAD^{commit}')"
+
+      - name: Not a tag build
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "dispatch build — no tag guard; the freshness gate runs in the build job instead"
+
+  validate:
+    needs: tag-guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       # Syntax + executable modes + required paths. Extracted to a script so this job and
@@ -92,6 +135,17 @@ jobs:
         env:
           REQUIRE_FAT: "1"
         run: ./scripts/test-seed-scrub.sh
+
+      # The rules pin, freshness gate and tag guard are the release path's own
+      # gates; run their unit tests (the same ones ci.yml runs on every PR)
+      # before trusting them with a build. (geekdojo/geekdojo-brain#208)
+      - name: Snort rules pin tests
+        timeout-minutes: 5
+        run: ./scripts/test-snort-rules-pin.sh
+
+      - name: Tag guard tests
+        timeout-minutes: 5
+        run: ./scripts/test-release-tag-guard.sh
 
   build:
     needs: validate
@@ -257,10 +311,26 @@ jobs:
       # RASPUTIN_SSH_AUTHORIZED_KEY in seed.env (apply-seed) — for us and
       # for end users alike. No seed key → console/LuCI only.
 
-      # Bake the pinned ET Open snort3 ruleset into files/etc/snort/.
+      # PRE-FLIGHT ONLY: fail when upstream's Community Rules tarball no longer
+      # matches PINNED_SHA. Break rather than go stale — but break HERE, on a
+      # dispatch build, where re-pinning is cheap. The error prints both SHAs and
+      # whether the mirror already holds upstream's (re-pin now) or not (refresh
+      # the mirror first). Tag builds skip it on purpose: a tag build's rules come
+      # from the mirror at the pin, and the tag-guard job has already required
+      # this step to pass on the same commit.
+      #
+      # The step NAME is load-bearing: scripts/rasputin-release-tag-guard.sh looks
+      # for exactly "Snort rules freshness gate" in this job. Rename both or
+      # neither (scripts/test-release-tag-guard.sh checks they agree).
+      - name: Snort rules freshness gate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: ./scripts/rasputin-snort-rules-freshness.sh
+
+      # Bake the pinned Snort3 Community Rules into files/etc/snort/.
       # ImageBuilder consumes files/ verbatim — the rules must be on disk
-      # BEFORE `make image` runs. The script is idempotent and pins the
-      # tarball SHA; bump PINNED_SHA in the script when refreshing rules.
+      # BEFORE `make image` runs. Downloaded from the org mirror at PINNED_SHA
+      # (never snort.org) and verified against it; a mismatch fails closed on
+      # every build, tag builds included.
       - name: Fetch Snort3 Community Rules
         run: ./scripts/fetch-snort-rules.sh
 
@@ -342,6 +412,22 @@ jobs:
           fi
           img="${src%.gz}"
           RASPUTIN_VERSION="$ver" ./scripts/assemble-ab-image.sh "$img" "$ver"
+
+      # Prove the baked rules parse under the Snort THIS image ships: extract
+      # rootfs-0 from the A/B disk just assembled, chroot into it, apply the
+      # image's own Snort UCI settings and run `snort-mgr -v check`. Runs on
+      # every image build, tag builds included — the pin proves which bytes we
+      # have, not that Snort accepts them, and the image's snort3 floats with the
+      # OpenWrt feed. Before staging, so a failing image is never uploaded.
+      - name: Snort rules check (built image)
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          # Bounded apt, as above. fdisk (sfdisk) came in with the assemble step.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            -o DPkg::Lock::Timeout=120 squashfs-tools
+          ver="${{ steps.ver.outputs.version }}"
+          sudo ./scripts/rasputin-snort-rules-check.sh "ab-out/rasputin-fw-n100-${ver}-ab.img.gz"
 
       - name: Stage release-shaped names + upload artifact
         run: |
