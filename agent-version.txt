@@ -481,4 +481,16 @@
 #                        the rebuild pulls the rolling feed, so read the actual delta
 #                        from THIS build's SBOM. Last canary run 2026-09-14 passed and
 #                        no canary issue is open.
-2026.09.2
+#   2026.09.3 (2026-09-15): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-cut of the WITHDRAWN 2026.09.2 line. That stable could not
+#                        complete: this repo's tag build failed on a stale Snort rules
+#                        pin (Talos republished ~12h after the pin was validated green)
+#                        and release tags are immutable, so 2026.09.2 was burned here.
+#                        rasputin-os and this repo must ALWAYS stay in version sync, so
+#                        the published CP and OS 2026.09.2 releases were demoted to
+#                        prerelease rather than shipped without a matching firewall.
+#                        Agent content UNCHANGED from 2026.09.2 / dev.159 -- zero files
+#                        under agent/, proto/, artifactsig/ or tileschema/. The snort
+#                        pin moved 5a388fa7 -> c50913e2 in #46 (same structure, same
+#                        4017 active rules).
+2026.09.3
