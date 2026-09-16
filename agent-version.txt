@@ -493,4 +493,26 @@
 #                        under agent/, proto/, artifactsig/ or tileschema/. The snort
 #                        pin moved 5a388fa7 -> c50913e2 in #46 (same structure, same
 #                        4017 active rules).
-2026.09.3
+#   2026.09.4-dev.164 (2026-09-16): DEV pin -- bench pin for bus TLS
+#                        (geekdojo/geekdojo-brain#448) and unbound-token refusal
+#                        (geekdojo/geekdojo-brain#423); the next stable re-pins to the
+#                        bare 2026.09.4. Built from CP 08ed3f7 (#317, #318, #319 on top of
+#                        the 2026.09.3 stable; the v2026.09.4-dev.164 tag itself sits on
+#                        dd860d0, which adds only #320's provision comments).
+#                        FUNCTIONAL agent change for this box, read from the
+#                        v2026.09.3..08ed3f7 agent + proto delta:
+#                          - #317: bus pin. The agent reads RASPUTIN_BUS_PIN (this
+#                            repo's #49 seeds it), else a pin the controlplane
+#                            delivered over the new bus.pin verb and saved under the
+#                            state dir; with a pin it dials the bus over TLS and
+#                            verifies the server key. Registration now reports busTls.
+#                          - #319: update.precheck reports BootCommitted from the rauc
+#                            and mock backends only; the openwrt-ab backend does not,
+#                            and the api asks only the controlplane's agent.
+#                          - #318 is api-side (no agent/ or proto/ change).
+#                          - No go.mod / go.sum change; no artifactsig or tileschema change.
+#                        Rebuild payload on top: #49-#51 (bus pin seed, node id required
+#                        on every seed) and the ImageBuilder feed refresh. No canary issue
+#                        is open. Snort community rules unchanged at c50913e2 (upstream
+#                        Last-Modified still 2026-09-16 01:30 UTC). OpenWrt base unchanged.
+2026.09.4-dev.164
