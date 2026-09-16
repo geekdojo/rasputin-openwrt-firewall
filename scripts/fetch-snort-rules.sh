@@ -95,9 +95,22 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # 2026-09-14 19:14 UTC, the archive build time. Found while preparing the
 # 2026.09.2-dev.159 agent pin, before any build failed on it; re-pinned in
 # the same PR.
+# -> c50913e21539... (2026-09-16, 4017 active rules; verified before pinning
+# to the standard above: two separate HTTPS downloads hashed identical, the
+# five-member tarball structure and rule count unchanged). It went live on
+# snort.org at 2026-09-16 01:30 UTC (the S3 object's Last-Modified); its gzip
+# header reads 2026-09-15 23:59 UTC, the archive build time.
+# THIS ONE COST A RELEASE. Talos republished ~12h after the 5a388fa7 pin --
+# which a dispatch build had validated GREEN at 20:36 UTC -- and the
+# 2026.09.2 STABLE tag build hit the new bytes at 04:00 UTC and failed.
+# Release tags are immutable, so that burned the firewall's 2026.09.2 and the
+# whole lockstep line had to be withdrawn and re-cut as 2026.09.3. A green
+# build five hours ago proves nothing about the build you are about to tag:
+# the os-release skill now requires a pre-flight image build immediately
+# before any stable tag.
 # Recurring toil; a stable org mirror of the tarball is a backlog item so
 # the firewall build stops breaking on upstream's cadence.
-PINNED_SHA="5a388fa782031148981f3563eba906f019520ebfc130c04747f166c69caae4cd"
+PINNED_SHA="c50913e2153c926fa32bfb897494d1f92ba70d01bfc202e4b22bdbd362c8f9d3"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
