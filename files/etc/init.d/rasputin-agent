@@ -24,13 +24,11 @@ start_service() {
 
 	# If the operator hasn't filled the seed yet, log + back off — procd
 	# will respawn on the configured cadence. Avoid a tight crash loop.
-	# Only nats_url gates startup: the controlplane does not enforce join
-	# tokens yet (TOFU — architecture.md decision #14; enforcement is the
-	# design-partner gate tracked in the backlog). Requiring a token here
-	# blocked the first real firewall attach on the Mu bench (2026-06-12)
-	# with a value nothing consumes. When token enforcement lands, the
-	# agent itself will fail the NATS connect with a clear error — this
-	# gate doesn't need to pre-empt it.
+	# Only nats_url gates startup. The controlplane's bus requires a join
+	# token by default (RASPUTIN_BUS_AUTH=enforce) and accepts any connection
+	# when run with RASPUTIN_BUS_AUTH=off, so the bus decides, not this gate.
+	# (A token without a node id never gets this far: apply-seed refuses
+	# that seed.)
 	if [ -z "$nats_url" ]; then
 		# No seed yet (fresh flash, pre-provision). Open NO procd instance and
 		# return cleanly. Do not `sleep 60; exit 1`: start_service isn't a

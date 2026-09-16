@@ -25,6 +25,12 @@
 #       a different valid pin replaces it;
 #     - sysupgrade's own file list keeps both a seeded pin (seed.env) and a
 #       delivered one (agent-state/bus/pin).
+#   And for the node id (geekdojo/geekdojo-brain#423):
+#     - a join token without RASPUTIN_NODE_ID (absent, blank, or a bare CR)
+#       fails apply-seed, leaves /etc/config/rasputin exactly as it was, and
+#       mints no id;
+#     - a token with its id applies both, through to the agent's environment;
+#     - a seed with neither still derives a valid id, stable across a re-run.
 #
 # HOW
 #   1. rootfs-0 of a firewall A/B image is unsquashed (the latest STABLE
@@ -338,6 +344,74 @@ if in_chroot /sbin/sysupgrade -l > "$WORK/keep.txt" 2> "$WORK/keep.err"; then
 else
 	bad "sysupgrade -l failed in the chroot:"; sed 's/^/      /' "$WORK/keep.err" >&2
 fi
+
+echo "7. a join token without a node id is refused and changes nothing"
+# The token is bound to the id it was issued for and the bus refuses it under any
+# other, so apply-seed must not derive one (geekdojo/geekdojo-brain#423). A blank
+# value and a bare CR (a seed saved on Windows) count as no id.
+NODE_ID_FILE="$ROOT/etc/rasputin/node-id"
+for idcase in absent blank cr; do
+	no_id_seed() {
+		case "$idcase" in
+			absent) base_seed | grep -v '^RASPUTIN_NODE_ID=' ;;
+			blank)  base_seed | sed 's#^RASPUTIN_NODE_ID=.*#RASPUTIN_NODE_ID=#' ;;
+			cr)     base_seed | sed 's#^RASPUTIN_NODE_ID=.*#RASPUTIN_NODE_ID=\r#' ;;
+		esac
+		printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"
+	}
+	label="token, no node id ($idcase)"
+	# on a provisioned box: the working config must survive untouched
+	reset; rm -f "$NODE_ID_FILE"
+	{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+	apply provisioned
+	cp "$UCI" "$WORK/uci-before"
+	no_id_seed | sed 's#^RASPUTIN_NATS_URL=.*#RASPUTIN_NATS_URL=nats://changed.local:4222#' > "$SEED"
+	apply no-id
+	[ "$APPLY_RC" -eq 1 ] && ok "$label: apply-seed exits 1" || bad "$label: apply-seed exit $APPLY_RC, want 1"
+	grep -q "carries a join token (RASPUTIN_CP_JOIN_TOKEN) but no RASPUTIN_NODE_ID" "$WORK/no-id.err" && ok "$label: says why on stderr" \
+		|| { bad "$label: no error naming the missing RASPUTIN_NODE_ID"; sed 's/^/      /' "$WORK/no-id.err" >&2; }
+	cmp -s "$WORK/uci-before" "$UCI" && ok "$label: /etc/config/rasputin unchanged (old id, old URL)" \
+		|| { bad "$label: /etc/config/rasputin changed"; diff "$WORK/uci-before" "$UCI" | sed 's/^/      /' >&2; }
+	# on a fresh box: nothing provisioned, and no id minted
+	reset; rm -f "$NODE_ID_FILE"
+	no_id_seed > "$SEED"
+	apply fresh-no-id
+	if [ "$APPLY_RC" -eq 1 ] && [ -z "$(uci_get rasputin.main.nats_url)" ] && [ -z "$(uci_get rasputin.main.node_id)" ] \
+		&& [ -z "$(uci_get rasputin.main.join_token)" ]; then
+		ok "$label: fresh box stays unprovisioned (no nats_url, node_id or join_token in UCI)"
+	else
+		bad "$label: fresh box: exit $APPLY_RC, nats_url '$(uci_get rasputin.main.nats_url)', node_id '$(uci_get rasputin.main.node_id)'"
+	fi
+	[ ! -e "$NODE_ID_FILE" ] && ok "$label: no id minted at /etc/rasputin/node-id" || bad "$label: minted /etc/rasputin/node-id: $(cat "$NODE_ID_FILE")"
+done
+
+echo "8. a join token with its node id: applied as before"
+reset; rm -f "$NODE_ID_FILE"
+base_seed > "$SEED"
+apply with-id
+agent_env > "$WORK/with-id.env" 2>&1
+[ "$APPLY_RC" -eq 0 ] && ok "apply-seed exits 0" || { bad "apply-seed exit $APPLY_RC"; sed 's/^/      /' "$WORK/with-id.err" >&2; }
+[ "$(uci_get rasputin.main.node_id)" = fw-test-1 ] && [ "$(uci_get rasputin.main.join_token)" = deadbeefdeadbeefdeadbeefdeadbeef ] \
+	&& ok "UCI carries the seed's node id and token" || bad "UCI node_id '$(uci_get rasputin.main.node_id)', join_token '$(uci_get rasputin.main.join_token)'"
+grep -qx "RASPUTIN_NODE_ID=fw-test-1" "$WORK/with-id.env" && ok "agent environment carries RASPUTIN_NODE_ID=fw-test-1" \
+	|| { bad "agent environment has no RASPUTIN_NODE_ID=fw-test-1:"; sed 's/^/      /' "$WORK/with-id.env" >&2; }
+[ ! -e "$NODE_ID_FILE" ] && ok "no id minted at /etc/rasputin/node-id" || bad "minted /etc/rasputin/node-id"
+
+echo "9. no join token and no node id: the box still derives a stable id"
+# Kept on purpose: a blank or sealed seed, or a bus run with RASPUTIN_BUS_AUTH=off,
+# has no token for an id to disagree with.
+reset; rm -f "$NODE_ID_FILE"
+base_seed | grep -v -e '^RASPUTIN_NODE_ID=' -e '^RASPUTIN_CP_JOIN_TOKEN=' > "$SEED"
+apply tokenless
+first_id="$(uci_get rasputin.main.node_id)"
+if [ "$APPLY_RC" -eq 0 ] && printf '%s\n' "$first_id" | grep -Eqx '[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'; then
+	ok "apply-seed exits 0 with a valid derived node id ($first_id)"
+else
+	bad "exit $APPLY_RC, node_id '$first_id'"; sed 's/^/      /' "$WORK/tokenless.err" >&2
+fi
+apply tokenless-again
+[ "$APPLY_RC" -eq 0 ] && [ -n "$first_id" ] && [ "$(uci_get rasputin.main.node_id)" = "$first_id" ] \
+	&& ok "re-run keeps the same derived id" || bad "re-run: exit $APPLY_RC, node_id '$(uci_get rasputin.main.node_id)', was '$first_id'"
 
 echo
 if [ "$fail" -eq 0 ]; then

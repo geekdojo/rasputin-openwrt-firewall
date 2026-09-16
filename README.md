@@ -157,11 +157,17 @@ disabled, so there is nothing to scp *to* until the seed lands your key.
 
 ```sh
 RASPUTIN_NODE_ROLE=firewall
+RASPUTIN_NODE_ID=fw-1                 # required with a token; the id the token was issued for
 RASPUTIN_NATS_URL=nats://rasputin.local:4222
 RASPUTIN_CP_JOIN_TOKEN=...            # minted by the controlplane
 RASPUTIN_SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop"  # optional; quote it — your SSH key
 RASPUTIN_BUS_PIN=sha256/...           # the controlplane's bus key pin; unquoted
 ```
+
+A join token is bound to one node id, so a seed with `RASPUTIN_CP_JOIN_TOKEN`
+must carry `RASPUTIN_NODE_ID` too: without it `apply-seed` stops and applies
+nothing, with the reason in `logread`, rather than derive an id the token would
+not match. The Add-node flow and `rasputin-provision` always write both.
 
 `RASPUTIN_BUS_PIN` makes the agent dial the bus over TLS and accept only the
 controlplane key it names. It is public, the controlplane puts it in every
