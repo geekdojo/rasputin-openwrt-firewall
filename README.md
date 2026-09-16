@@ -84,7 +84,12 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
 .github/workflows/canary.yml          scheduled build canary (catches upstream drift)
 scripts/init-imagebuilder.sh          download + verify the pinned OpenWrt ImageBuilder
 scripts/assemble-ab-image.sh          combined-efi image → A/B GPT disk + .rootfs OTA artifact
-scripts/fetch-snort-rules.sh          hash-pinned snort3 ruleset fetch (run before build)
+scripts/fetch-snort-rules.sh          hash-pinned snort3 ruleset fetch from the org mirror
+                                      (run before build)
+scripts/rasputin-snort-rules-freshness.sh
+                                      pre-flight gate: upstream ruleset vs the pin
+scripts/rasputin-snort-rules-check.sh  do the baked rules parse under the image's Snort?
+scripts/rasputin-release-tag-guard.sh a tag build needs a green pre-flight on its commit
 packages.txt                          package list passed to `make image`
 agent-version.txt                     pinned rasputin-agent release version
 image/genimage.cfg, image/grub.cfg    A/B disk layout + boot-counter GRUB config

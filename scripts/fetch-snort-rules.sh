@@ -18,39 +18,73 @@
 # `FATAL: see prior 212249 errors`. Snort3 Community Rules are
 # snort3-native and parse cleanly. Swapped 2026-06-08 on the CWWK.
 #
+# WHERE THE BYTES COME FROM (geekdojo/geekdojo-brain#208)
+#   Every build — the stable tag build included — downloads the tarball from the
+#   org mirror, geekdojo/rasputin-snort3-rules-mirror, at the release named for
+#   PINNED_SHA:
+#     https://github.com/geekdojo/rasputin-snort3-rules-mirror/releases/download/sha256-<PINNED_SHA>/snort3-community-rules.tar.gz
+#   Each mirror release is byte-identical to one upstream tarball, content-
+#   addressed by its sha256, and never overwritten, so an old pin always
+#   resolves. The download is still verified against PINNED_SHA here and a
+#   mismatch still fails closed: the mirror is a convenience for
+#   REPRODUCIBILITY, never a reason to trust bytes.
+#
+#   FRESHNESS is a separate check with a separate owner:
+#   scripts/rasputin-snort-rules-freshness.sh compares upstream's current SHA
+#   with PINNED_SHA. release.yml runs it on workflow_dispatch builds (the
+#   pre-flight) and FAILS when they differ; tag builds skip it, so a Talos
+#   republish can no longer burn an immutable tag. The tag build instead
+#   requires a green pre-flight on its exact commit
+#   (scripts/rasputin-release-tag-guard.sh).
+#
 # Rule updates ride image releases (sysupgrade cadence); per-deployment
-# rule pushes are a backlog item. Bump PINNED_SHA when refreshing.
+# rule pushes are a backlog item. To re-pin: the mirror must already hold
+# sha256-<new sha> — its refresh workflow verifies and publishes it:
+#   gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror
+# Then set PINNED_SHA below, add a history entry, and run this script — it must print
+# "sha256 verified".
 #
 # Usage:
 #   ./scripts/fetch-snort-rules.sh           # idempotent — skips if up to date
 #   FORCE=1 ./scripts/fetch-snort-rules.sh   # re-fetch even if stamp matches
 #   REPORT_DRIFT=1 ./scripts/fetch-snort-rules.sh
-#                                            # a SHA mismatch is a FINDING, not
-#                                            # a failure — see below
+#                                            # also REPORT upstream drift — see below
+#   ./scripts/fetch-snort-rules.sh --print-pin
+#                                            # print the pin + mirror location
+#                                            # and exit (read by the freshness
+#                                            # script, so the pin has ONE home)
+#
+# SNORT_RULES_MIRROR_BASE overrides the mirror's download base URL. It exists for
+# scripts/test-snort-rules-pin.sh, which serves fixture tarballs locally. It
+# cannot smuggle bytes in: whatever it serves is verified against PINNED_SHA.
 #
 # REPORT_DRIFT exists for the weekly canary (.github/workflows/canary.yml) and
 # for nothing else. That workflow is the drift detector: it rebuilds the image,
 # diffs the package manifest against the last stable's SBOM, and files an issue
-# when something moved. Failing closed here killed it — Talos republishes the
-# tarball on its own schedule, so from 2026-09-07 the canary died at this step
-# and never reached the code that files the issue. Two weeks of no canary issue
-# read as "no drift" and were actually a dead canary: the check meant to warn
-# you was taken down by the very thing it exists to warn about.
+# when something moved. Failing closed on upstream drift killed it — Talos
+# republishes the tarball on its own schedule, so from 2026-09-07 the canary
+# died at this step and never reached the code that files the issue. Two weeks
+# of no canary issue read as "no drift" and were actually a dead canary: the
+# check meant to warn you was taken down by the very thing it exists to warn
+# about.
 #
-# So with REPORT_DRIFT=1 a mismatch stages the tarball as downloaded, reports
-# both SHAs (stdout, plus $GITHUB_OUTPUT for the workflow to consume), and exits
-# 0 so the build continues. WITHOUT the flag — which is every other caller,
-# release.yml above all — behaviour is unchanged and a mismatch is still fatal.
-# That is deliberate and must stay that way: shipping rules we have not verified
-# onto a security appliance is a supply-chain hole, and a release must never be
-# able to do it by accident.
+# So with REPORT_DRIFT=1 the rules are staged exactly as on every other path —
+# from the mirror at PINNED_SHA, verified, fatal on a mismatch — and THEN
+# upstream is compared with the pin in report mode: an upstream move (or an
+# upstream that cannot be reached) is printed and written to $GITHUB_OUTPUT as
+# rules_drift / rules_pinned_sha / rules_actual_sha / rules_mirror_status, and
+# the script exits 0 so the build continues. The canary therefore never bakes
+# unverified rules, and never dies on an upstream move either.
 
 set -euo pipefail
 
-RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.gz"
-# Talos publishes new Community Rules ~weekly, so this pin drifts and the
-# release build fails closed on it by design (the canary REPORTS it instead —
-# see REPORT_DRIFT above); bumping it is the routine refresh path.
+# The mirror. Release tag = "sha256-<full sha>", one asset of this name.
+MIRROR_REPO="geekdojo/rasputin-snort3-rules-mirror"
+MIRROR_BASE="${SNORT_RULES_MIRROR_BASE:-https://github.com/$MIRROR_REPO/releases/download}"
+TARBALL_NAME="snort3-community-rules.tar.gz"
+# Upstream publishes new Community Rules ~weekly, so this pin goes stale; the
+# release PRE-FLIGHT (a workflow_dispatch build) fails on that by design, and
+# the canary REPORTS it. Tag builds never fetch upstream at all.
 # History: dev.2 (df1de9995bc6...) → dev.4 (bb947bc02530...) → dev.8
 # (d891178755d7..., 2026-06-12, ~4017 rules) → dev.13 (643dfc20e363...,
 # 2026-06-17) → e913e956ce1e... → 2026-06-29 (11b59e5041af..., ~4017
@@ -108,59 +142,77 @@ RULES_URL="https://www.snort.org/downloads/community/snort3-community-rules.tar.
 # build five hours ago proves nothing about the build you are about to tag:
 # the os-release skill now requires a pre-flight image build immediately
 # before any stable tag.
-# Recurring toil; a stable org mirror of the tarball is a backlog item so
-# the firewall build stops breaking on upstream's cadence.
+# -> SOURCE SWITCH, same c50913e21539... pin (2026-09-16,
+# geekdojo/geekdojo-brain#208). No new bytes: this script stopped downloading
+# from snort.org and now fetches the pinned tarball from the org mirror
+# (geekdojo/rasputin-snort3-rules-mirror, release sha256-<sha>), still verified
+# against this SHA. The pre-flight freshness gate in release.yml now owns
+# "upstream moved", and a tag build only runs on a commit with a green
+# pre-flight — so upstream moving between the pre-flight and the tag no longer
+# changes what the tag builds. Re-pins still happen at upstream's cadence, but
+# they are caught at pre-flight, where re-pinning is cheap.
 PINNED_SHA="c50913e2153c926fa32bfb897494d1f92ba70d01bfc202e4b22bdbd362c8f9d3"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
 RULES_DIR="$STAGE_DIR/rules"
 STAMP_FILE="$STAGE_DIR/.snort3-community-stamp"
-TMP_TAR="$(mktemp -t snort3-community.tar.gz.XXXXXX)"
-trap 'rm -f "$TMP_TAR"' EXIT
+RULES_URL="$MIRROR_BASE/sha256-$PINNED_SHA/$TARBALL_NAME"
 
-# REPORT_DRIFT implies FORCE. The idempotent skip below answers "is what is on
-# disk what we pinned?", which is not the question the canary is asking — it
-# wants to know whether UPSTREAM still matches the pin, and that needs a fetch.
-# A stamp left behind by an earlier run would otherwise let the detector skip
-# the download and report "no drift" without having looked, which is the same
-# silent blind spot this flag was added to close.
-if [ "${FORCE:-0}" != "1" ] && [ "${REPORT_DRIFT:-0}" != "1" ] && [ -f "$STAMP_FILE" ]; then
+if [ "${1:-}" = "--print-pin" ]; then
+	printf 'PINNED_SHA=%s\nMIRROR_BASE=%s\nTARBALL_NAME=%s\n' "$PINNED_SHA" "$MIRROR_BASE" "$TARBALL_NAME"
+	exit 0
+fi
+if [ "$#" -ne 0 ]; then
+	echo "usage: $0 [--print-pin]" >&2
+	exit 2
+fi
+
+# The upstream comparison, report mode. Called on every REPORT_DRIFT exit path
+# that has staged verified rules — including the idempotent skip, because the
+# question the canary asks ("has UPSTREAM moved?") does not depend on what is on
+# disk, and skipping it there would report nothing without having looked.
+report_drift() {
+	[ "${REPORT_DRIFT:-0}" = "1" ] || return 0
+	REPORT_DRIFT=1 "$REPO_ROOT/scripts/rasputin-snort-rules-freshness.sh"
+}
+
+if [ "${FORCE:-0}" != "1" ] && [ -f "$STAMP_FILE" ]; then
 	if [ "$(cat "$STAMP_FILE")" = "$PINNED_SHA" ]; then
 		echo "snort rules already at $PINNED_SHA (stamp matches); skipping"
+		report_drift
 		exit 0
 	fi
 	echo "stamp mismatch (have=$(cat "$STAMP_FILE") want=$PINNED_SHA); re-fetching"
 fi
 
+TMP_TAR="$(mktemp -t snort3-community.tar.gz.XXXXXX)"
+trap 'rm -f "$TMP_TAR"' EXIT
+
 echo "fetching $RULES_URL"
-curl -fsSL --retry 3 --retry-delay 2 -o "$TMP_TAR" "$RULES_URL"
+if ! curl -fsSL --retry 3 --retry-delay 2 -o "$TMP_TAR" "$RULES_URL"; then
+	echo "::error::could not download the pinned Snort3 Community Rules from the mirror" >&2
+	echo "  url: $RULES_URL" >&2
+	echo "  The mirror has no release sha256-$PINNED_SHA, or GitHub is unreachable." >&2
+	echo "  A pin must never point at a SHA the mirror does not hold: check" >&2
+	echo "  https://github.com/$MIRROR_REPO/releases before re-pinning." >&2
+	exit 1
+fi
 
 actual_sha=$(sha256sum "$TMP_TAR" | awk '{print $1}')
-rules_drift=false
 if [ "$actual_sha" != "$PINNED_SHA" ]; then
-	if [ "${REPORT_DRIFT:-0}" = "1" ]; then
-		# Findings go to stdout, not stderr, and as ::warning:: rather than
-		# ::error:: — an ::error:: annotation on a run that deliberately
-		# succeeded reads as a broken canary, which is exactly the confusion
-		# this whole change is undoing.
-		rules_drift=true
-		echo "::warning::Snort3 Community Rules pin is stale — upstream tarball SHA no longer matches PINNED_SHA"
-		echo "  pinned:   $PINNED_SHA"
-		echo "  upstream: $actual_sha"
-		echo "REPORT_DRIFT=1: staging the tarball as downloaded and continuing, so the"
-		echo "drift-detection build still produces a package manifest to diff. This is a"
-		echo "measurement, NOT a releasable image — the rules in it are unverified."
-	else
-		echo "::error::Snort3 Community Rules tarball SHA mismatch" >&2
-		echo "  expected: $PINNED_SHA" >&2
-		echo "  actual:   $actual_sha" >&2
-		echo "If the upstream ruleset moved on intentionally, update PINNED_SHA in this script." >&2
-		exit 1
-	fi
-else
-	echo "sha256 verified: $actual_sha"
+	# Fatal on EVERY path, REPORT_DRIFT included. The mirror is content-addressed,
+	# so bytes at sha256-<X> that do not hash to X are not drift; they are a
+	# corrupted or tampered mirror, and nothing downstream may consume them.
+	echo "::error::Snort3 Community Rules tarball SHA mismatch (mirror bytes do not match the pin)" >&2
+	echo "  expected: $PINNED_SHA" >&2
+	echo "  actual:   $actual_sha" >&2
+	echo "  url:      $RULES_URL" >&2
+	echo "The mirror release is content-addressed and must never change. Treat this as a" >&2
+	echo "supply-chain alarm, not a routine re-pin: do NOT copy the actual SHA into PINNED_SHA." >&2
+	exit 1
 fi
+echo "sha256 verified: $actual_sha"
 
 # Wipe any prior build-fetched content and reseed.
 rm -rf "$RULES_DIR"
@@ -185,27 +237,10 @@ if [ ! -s "$RULES_DIR/snort3-community.rules" ]; then
 	exit 1
 fi
 
-# The stamp records what is ACTUALLY staged, not what we wanted. On the default
-# path those are the same value — a mismatch has already exited 1 by here — so
-# this writes exactly what it always did. Under REPORT_DRIFT they differ, and
-# writing the pin instead would be a lie with teeth: the next default-mode run
-# would see stamp == PINNED_SHA, take the idempotent skip at the top of this
-# script, and hand a release build drifted rules while reporting them verified.
+# The stamp is written only after verification, so it always names bytes that
+# hashed to PINNED_SHA; the idempotent skip above relies on that.
 echo "$actual_sha" > "$STAMP_FILE"
 rule_count=$(grep -cE '^(alert|drop|block|reject)' "$RULES_DIR/snort3-community.rules" || true)
 echo "staged 1 rule file (~$rule_count rules) into $RULES_DIR"
 
-# Machine-readable signal, report mode only. GitHub reads $GITHUB_OUTPUT back as
-# the step's outputs, which is how canary.yml's "Decide whether to open an issue"
-# and "Build issue body" steps see this finding without re-parsing our stdout —
-# the same mechanism every other reporting step in that workflow already uses.
-# Outside Actions the variable is unset and this is a no-op; setting it by hand
-# is also how you exercise this path locally:
-#   GITHUB_OUTPUT=/tmp/out REPORT_DRIFT=1 ./scripts/fetch-snort-rules.sh
-if [ "${REPORT_DRIFT:-0}" = "1" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
-	{
-		echo "rules_drift=$rules_drift"
-		echo "rules_pinned_sha=$PINNED_SHA"
-		echo "rules_actual_sha=$actual_sha"
-	} >> "$GITHUB_OUTPUT"
-fi
+report_drift

@@ -3,17 +3,20 @@ name: canary
 # Weekly drift + OpenWrt-currency detector. Builds the same firewall image
 # we'd ship for a release, diffs the resulting package manifest against the
 # latest stable release's manifest, checks whether the pinned OpenWrt base is
-# behind its latest point release, and checks whether the pinned Snort rules
-# tarball still matches upstream. If packages drifted, the base is behind, or
-# the rules pin is stale, opens (or updates) a GitHub issue with a suggested
+# behind its latest point release, checks whether the pinned Snort rules
+# tarball still matches upstream, and checks that the pinned rules still parse
+# under the Snort this week's feed ships. If packages drifted, the base is
+# behind, the rules pin is stale (or its freshness could not be checked), or
+# the rules no longer parse, opens (or updates) a GitHub issue with a suggested
 # cut command.
 #
 # Every check here REPORTS; none of them may fail the run. A detector that
 # dies on a finding reports nothing, and its silence is indistinguishable from
 # a clean week — see the Snort rules step below for the two weeks this repo
-# lost to exactly that. The one thing that follows from it: when the rules pin
-# is stale this build stages unverified rules, so the image it produces is a
-# measurement and never a release candidate.
+# lost to exactly that. The rules themselves are the exception that proves the
+# rule: they come from the org mirror at PINNED_SHA and are VERIFIED, and a
+# mirror that serves the wrong bytes does fail the run. That is not a finding
+# about the world; it is a supply-chain alarm, and a red run is the right noise.
 #
 # (Generic image CVE scanners — trivy/osv — were retired 2026-07-20: proven
 # unable to read OpenWrt package data. OpenWrt owns ~all packages here and
@@ -108,27 +111,29 @@ jobs:
           printf '%s' "${{ vars.RASPUTIN_ROOT_CA_PEM }}" \
             > files/etc/rasputin/trust/root-ca.pem
 
-      # A stale rules pin is a FINDING here, not a build failure — the one place
-      # in this repo where that is true. fetch-snort-rules.sh pins the Snort3
-      # Community tarball's sha256 and exits 1 when upstream no longer matches;
-      # Talos republishes that tarball roughly weekly, so the mismatch is not an
-      # anomaly, it is the schedule. Plain, that made the detector killable by
-      # the thing it detects: from 2026-09-07 every canary run died right here,
-      # never reached the package diff, the base-currency check or the steps
-      # that file the issue, and two weeks of silence read as "no drift" when
-      # what we actually had was a dead canary.
+      # A stale rules pin is a FINDING here, not a build failure. Talos republishes
+      # the Community Rules tarball roughly weekly, so upstream moving away from
+      # PINNED_SHA is not an anomaly, it is the schedule. When this step used to
+      # fail closed on it, the detector was killable by the thing it detects:
+      # from 2026-09-07 every canary run died right here, never reached the
+      # package diff, the base-currency check or the steps that file the issue,
+      # and two weeks of silence read as "no drift" when what we actually had
+      # was a dead canary.
       #
-      # REPORT_DRIFT=1 makes the mismatch non-fatal FOR THIS WORKFLOW ONLY: the
-      # script stages the tarball it actually downloaded, prints both SHAs, sets
-      # rules_drift / rules_pinned_sha / rules_actual_sha as step outputs, and
-      # exits 0 — so the build proceeds and the package diff, the main event,
-      # still happens. The finding is then carried into the issue by the decide
-      # and body steps below, exactly like package drift and base currency.
+      # Since geekdojo/geekdojo-brain#208 the two questions are separate. The
+      # rules this build bakes come from the org mirror at PINNED_SHA, verified
+      # — the same bytes a release would bake, so this image is a real candidate
+      # build, never one carrying unverified rules. THEN, with REPORT_DRIFT=1,
+      # upstream is compared with the pin and the answer is written as step
+      # outputs — rules_drift (true | false | unknown), rules_pinned_sha,
+      # rules_actual_sha, rules_mirror_status — and the step exits 0 on any
+      # upstream answer, including snort.org being unreachable. The decide and
+      # body steps below carry the finding into the issue, like package drift
+      # and base currency.
       #
-      # release.yml calls this same script WITHOUT the flag and still fails
-      # closed. Leave it that way: baking rules we have not verified into an
-      # image that ships to a security appliance is a supply-chain hole, and the
-      # release path is the one place that must never be able to do it quietly.
+      # release.yml runs the same comparison WITHOUT the flag on its pre-flight
+      # (dispatch) builds, where a stale pin fails the build — that is where
+      # freshness is enforced; here it is only reported.
       - name: Fetch Snort3 Community Rules
         id: rules
         env:
@@ -140,13 +145,10 @@ jobs:
       # (it's a drift-detection build, not a release), so a clearly-labelled
       # placeholder is used. Build-generated, gitignored — never committed.
       #
-      # That label is load-bearing now that the step above can stage rules which
-      # do NOT match PINNED_SHA. When the pin is stale this image carries
-      # whatever Talos published that morning, unverified — a measurement, never
-      # a release candidate. Nothing here can turn it into one: no step uploads
-      # the image (the artifact step publishes canary-out/ only), no release job
-      # consumes this job, and the version string reads "0.0.0-canary" so it is
-      # unmistakable on a box if one ever escaped by hand.
+      # The image is still a measurement, not a release: no step uploads it (the
+      # artifact step publishes canary-out/ only), no release job consumes this
+      # job, and the version string reads "0.0.0-canary" so it is unmistakable on
+      # a box if one ever escaped by hand.
       - name: Bake image version into overlay
         run: |
           mkdir -p files/etc/rasputin
@@ -190,6 +192,34 @@ jobs:
           img="${src%.gz}"
           ./scripts/patch-image-cmdline.sh "$img"
           gzip -f "$img"
+
+      # Mirror release.yml's "Snort rules check (built image)": do the pinned
+      # rules parse under the snort3 THIS week's feed put in the image? The
+      # image's Snort floats with the OpenWrt feed, so a feed update can break
+      # rules that parsed last week, and the next release build would fail on it.
+      # Same script, pointed at the rootfs of the single-rootfs combined-efi image
+      # (partition 2 — the canary does not assemble the A/B disk).
+      #
+      # REPORTS, never fails the run (see the header): the exit code becomes
+      # result=pass | fail (Snort rejected the rules) | error (the check could not
+      # run), and the decide + body steps carry it into the issue.
+      - name: Snort rules check (built image)
+        id: rules_check
+        timeout-minutes: 15
+        run: |
+          set -uo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            -o DPkg::Lock::Timeout=120 squashfs-tools fdisk \
+            || { echo "::warning::could not install squashfs-tools/fdisk — rules check not run"; echo "result=error" >> "$GITHUB_OUTPUT"; exit 0; }
+          src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
+          rc=0
+          sudo ROOTFS_PARTITION=2 ./scripts/rasputin-snort-rules-check.sh "$src" || rc=$?
+          case "$rc" in
+            0) result=pass ;;
+            1) result=fail; echo "::warning::the pinned Snort rules do NOT parse under this image's snort3 — the next release build will fail its rules check" ;;
+            *) result=error; echo "::warning::the Snort rules check could not run (exit $rc)" ;;
+          esac
+          echo "result=$result" >> "$GITHUB_OUTPUT"
 
       # --- capture this build's SBOM and the build summary ---------------
 
@@ -341,18 +371,24 @@ jobs:
           drift="${{ steps.diff.outputs.changed }}"
           behind="${{ steps.base.outputs.behind }}"
           rules="${{ steps.rules.outputs.rules_drift }}"
+          rules_check="${{ steps.rules_check.outputs.result }}"
           force="${{ github.event.inputs.force_issue }}"
           # Open an issue if ANY of: package drift detected, the OpenWrt base
           # is behind its latest point release, the pinned Snort rules tarball
-          # no longer matches upstream, manually forced.
+          # no longer matches upstream (or that could not be checked), the
+          # pinned rules do not parse under this image's Snort (or that could
+          # not be checked), manually forced.
           #
-          # A stale rules pin is sufficient ON ITS OWN. It is the only finding
-          # here that is also actively blocking: release.yml fails closed on it,
-          # so until a human bumps PINNED_SHA no release can be cut at all. That
-          # is precisely the state nobody was told about for two weeks while the
-          # canary was dying at the fetch step instead of reporting from it.
+          # Each rules finding is sufficient ON ITS OWN, because each one blocks
+          # releases: release.yml's pre-flight fails its freshness gate on a stale
+          # pin, a tag build needs a green pre-flight, and every image build fails
+          # its rules check on rules Snort rejects. That is precisely the state
+          # nobody was told about for two weeks while the canary was dying at the
+          # fetch step instead of reporting from it. "Could not check" opens an
+          # issue too: a check that silently did not run reads as a clean week.
           if [ "$drift" = "true" ] || [ "$behind" = "true" ] \
-             || [ "$rules" = "true" ] || [ "$force" = "true" ]; then
+             || [ "$rules" = "true" ] || [ "$rules" = "unknown" ] \
+             || [ "$rules_check" != "pass" ] || [ "$force" = "true" ]; then
             echo "open_issue=true" >> "$GITHUB_OUTPUT"
           else
             echo "open_issue=false" >> "$GITHUB_OUTPUT"
@@ -415,45 +451,72 @@ jobs:
               old8=$(printf '%s' "${{ steps.rules.outputs.rules_pinned_sha }}" | cut -c1-8)
               new8=$(printf '%s' "${{ steps.rules.outputs.rules_actual_sha }}" | cut -c1-8)
               echo
-              echo "⚠️ **The pinned Snort3 Community Rules tarball no longer matches upstream.** Talos republishes it roughly weekly, so this is routine — but it is also *blocking*: \`scripts/fetch-snort-rules.sh\` fails closed on a SHA mismatch, so **release.yml cannot build until the pin is bumped.**"
+              echo "⚠️ **The pinned Snort3 Community Rules tarball no longer matches upstream.** Talos republishes it roughly weekly, so this is routine — but it is also *blocking*: release.yml's pre-flight (dispatch) build fails its freshness gate on a stale pin, and a tag build needs a green pre-flight on its commit, so **no release can be cut until the pin is bumped.**"
               echo
               echo "| | sha256 |"
               echo "|---|---|"
               echo "| Pinned (\`PINNED_SHA\`) | \`${{ steps.rules.outputs.rules_pinned_sha }}\` |"
               echo "| Upstream today | \`${{ steps.rules.outputs.rules_actual_sha }}\` |"
               echo
-              echo "Remediation — bump the pin, verify, commit:"
+              if [ "${{ steps.rules.outputs.rules_mirror_status }}" != "present" ]; then
+                echo "**The mirror does not hold upstream's tarball yet** (status: \`${{ steps.rules.outputs.rules_mirror_status }}\`). Refresh the mirror first (\`gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror\`) and wait for release \`sha256-${{ steps.rules.outputs.rules_actual_sha }}\` to exist — builds fetch from the mirror, so a pin it does not hold breaks every build."
+                echo
+              fi
+              echo "Remediation — once the mirror holds it: bump the pin, verify, commit:"
               echo
               echo '```sh'
               echo "# 1. In scripts/fetch-snort-rules.sh set:"
               echo "#      PINNED_SHA=\"${{ steps.rules.outputs.rules_actual_sha }}\""
               echo "#    and add a line to the history comment above it, as every prior re-pin has."
-              echo "# 2. Re-fetch and verify against the new pin (must print 'sha256 verified'):"
+              echo "# 2. Fetch from the mirror and verify against the new pin (must print 'sha256 verified'):"
               echo "FORCE=1 ./scripts/fetch-snort-rules.sh"
               echo "# 3. Commit the bump:"
               echo "git commit -am 'snort: re-pin community rules $old8 -> $new8 (Talos republish)'"
               echo '```'
               echo
-              echo "_This canary run staged the tarball it downloaded today instead of the pinned one, so the package diff above is still real and this report is complete. It also means the image this run built is **not releasable** — it carries unverified rules by design, and nothing publishes it._"
+              echo "_This canary run baked the rules at the current pin, fetched from the mirror and verified, so the package diff above is real and the report is complete._"
+            elif [ "${{ steps.rules.outputs.rules_drift }}" = "unknown" ]; then
+              echo
+              echo "⚠️ **Could not check the rules pin against upstream this run** — snort.org did not answer. Freshness is unknown, not fresh. Check by hand: \`./scripts/rasputin-snort-rules-freshness.sh\`. (The rules this run baked are the verified pin, from the mirror.)"
             else
               echo
               echo "✅ Upstream tarball still matches \`PINNED_SHA\` (\`${{ steps.rules.outputs.rules_pinned_sha }}\`)."
             fi
+            echo
+            echo "### Snort rules check"
+            case "${{ steps.rules_check.outputs.result }}" in
+              pass)
+                echo
+                echo "✅ The pinned rules parse under this image's snort3 (\`snort-mgr -v check\`)." ;;
+              fail)
+                echo
+                echo "❌ **The pinned rules do NOT parse under the snort3 in this week's feed.** Every release build runs the same check and will fail until this is resolved — the image's Snort version floats with the OpenWrt feed. The rejected rules and Snort's errors are in the \`Snort rules check (built image)\` step log of the workflow run above." ;;
+              *)
+                echo
+                echo "⚠️ **The Snort rules check did not run** (result: \`${{ steps.rules_check.outputs.result }}\`) — see the \`Snort rules check (built image)\` step log. Unknown is not a pass." ;;
+            esac
             echo
             echo "### Suggested action"
             echo
             if [ "${{ steps.diff.outputs.changed }}" = "true" ] || \
                [ "${{ steps.base.outputs.behind }}" = "true" ] || \
                [ "${{ steps.rules.outputs.rules_drift }}" = "true" ]; then
-              echo "Cut \`$suggested\`:"
+              echo "Cut \`$suggested\`. A tag build refuses to start without a green pre-flight on the exact commit it tags, so pre-flight first:"
               echo
               echo '```sh'
+              echo "gh workflow run release.yml -f full_build=true --ref main   # wait for it to go green"
               echo "git tag -a $suggested -m \"canary $today — pick up OpenWrt base / package updates\""
               echo "git push origin $suggested"
               echo '```'
               echo
               echo "If a base bump drove this, update \`OPENWRT_VERSION\` first."
-              echo "If a stale rules pin drove this, bump \`PINNED_SHA\` first — the release build fails closed on it, so the tag would not build."
+              echo "If a stale rules pin drove this, bump \`PINNED_SHA\` first (after the mirror holds the new tarball) — the pre-flight's freshness gate fails on a stale pin."
+              if [ "${{ steps.rules_check.outputs.result }}" != "pass" ]; then
+                echo "Resolve the Snort rules check above first — every release build runs it."
+              fi
+            elif [ "${{ steps.rules.outputs.rules_drift }}" = "unknown" ] || \
+                 [ "${{ steps.rules_check.outputs.result }}" != "pass" ]; then
+              echo "_Nothing to cut from this run: resolve the Snort rules findings above._"
             else
               echo "_Forced issue: no drift or base update to act on._"
             fi
