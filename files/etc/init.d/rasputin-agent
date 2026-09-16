@@ -14,12 +14,13 @@ start_service() {
 	# Read UCI config (set by uci-defaults/99-rasputin from the seed).
 	. /lib/functions.sh
 	config_load rasputin
-	local nats_url join_token node_role node_id
+	local nats_url join_token node_role node_id cluster_id bus_pin
 	config_get nats_url   main nats_url
 	config_get join_token main join_token
 	config_get node_role  main node_role  firewall
 	config_get node_id    main node_id
 	config_get cluster_id main cluster_id rasputin
+	config_get bus_pin    main bus_pin
 
 	# If the operator hasn't filled the seed yet, log + back off — procd
 	# will respawn on the configured cadence. Avoid a tight crash loop.
@@ -52,6 +53,13 @@ start_service() {
 	# unset value here would leave the agent deriving its own default, which is
 	# the same answer today but silently diverges the moment the default moves.
 	procd_append_param env RASPUTIN_CLUSTER_ID="${cluster_id:-rasputin}"
+	# The bus pin (geekdojo/geekdojo-brain#448): with it the agent dials the bus
+	# over TLS and accepts only the server key that hashes to it. Written to UCI
+	# by apply-seed, which has already refused a malformed one. Passed only when
+	# set: with no pin the agent falls back to the pin file a controlplane
+	# delivered into RASPUTIN_AGENT_STATE_DIR (below), and with neither it dials
+	# in plaintext as before.
+	[ -n "$bus_pin" ] && procd_append_param env RASPUTIN_BUS_PIN="$bus_pin"
 	# Trust root for verifying signed update images before sysupgrade.
 	procd_append_param env RASPUTIN_TRUST_ROOT=/etc/rasputin/trust/root-ca.pem
 	# Agent state (updater bookkeeping, mock-backend state). Without this

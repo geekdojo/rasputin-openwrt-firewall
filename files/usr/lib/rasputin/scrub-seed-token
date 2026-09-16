@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# scrub-seed-token — blank the consumed one-time join token on the seed FAT.
+# scrub-seed-token — blank the consumed one-time join token on the seed FAT,
+# and any bus private key that should never have been there.
 #
 # WHY
 #   The enrollment seed arrives on a FAT partition the operator can mount on a
@@ -42,6 +43,14 @@
 #   chance (uci-defaults self-delete). Same posture as compute's scrub and as
 #   the SSH-key merge beside it.
 #
+# THE BUS PRIVATE KEY
+#   RASPUTIN_BUS_KEY belongs only in the controlplane's seed
+#   (geekdojo/geekdojo-brain#448). A firewall never uses it — apply-seed warns,
+#   applies nothing and blanks it from /etc/rasputin/seed.env — so a copy on
+#   this FAT is a secret at rest with no reader at all. It is blanked here
+#   alongside the token, on the same after-apply path, for the same reason.
+#   RASPUTIN_BUS_PIN is public and is left alone.
+#
 # Usage:
 #   scrub-seed-token                 locate and mount the seed FAT itself
 #   scrub-seed-token <mounted-dir>   scrub an already-mounted seed root
@@ -53,22 +62,21 @@
 
 set -u
 
-TOKEN_KEY=RASPUTIN_CP_JOIN_TOKEN
-
 log() { logger -t rasputin "scrub-seed-token: $*" 2>/dev/null || true; }
 
-# scrub_file blanks the token's VALUE, keeping the key and every other line.
-# Returns 0 only when a token was actually present and has been rewritten.
+# scrub_file FILE KEY blanks KEY's VALUE, keeping the key and every other line.
+# Returns 0 only when a value was actually present and has been rewritten.
 scrub_file() {
 	f="$1"
+	key="$2"
 
-	# `=.` — a key with something after it. An already-blank token is not a
+	# `=.` — a key with something after it. An already-blank value is not a
 	# failure and not work; distinguishing them is what keeps the log honest
 	# about whether anything was at rest.
-	grep -q "^${TOKEN_KEY}=." "$f" 2>/dev/null || return 1
+	grep -q "^${key}=." "$f" 2>/dev/null || return 1
 
 	tmp="/tmp/rasputin-seed-scrub.$$"
-	if ! sed "s#^${TOKEN_KEY}=.*#${TOKEN_KEY}=#" "$f" > "$tmp" 2>/dev/null; then
+	if ! sed "s#^${key}=.*#${key}=#" "$f" > "$tmp" 2>/dev/null; then
 		rm -f "$tmp"
 		return 1
 	fi
@@ -111,14 +119,18 @@ fi
 scrubbed=0
 for name in rasputin-seed.env seed.env; do
 	[ -f "$MNT/$name" ] || continue
-	if scrub_file "$MNT/$name"; then
-		log "blanked $TOKEN_KEY in $name on the seed FAT"
-		scrubbed=$((scrubbed + 1))
-	fi
+	# The secrets blanked on the seed FAT: the consumed join token, and a bus
+	# private key that has no business on a firewall (see THE BUS PRIVATE KEY).
+	for key in RASPUTIN_CP_JOIN_TOKEN RASPUTIN_BUS_KEY; do
+		if scrub_file "$MNT/$name" "$key"; then
+			log "blanked $key in $name on the seed FAT"
+			scrubbed=$((scrubbed + 1))
+		fi
+	done
 done
 
 if [ "$scrubbed" -eq 0 ]; then
-	log "no consumed token on the seed FAT; nothing to scrub"
+	log "no consumed token or bus key on the seed FAT; nothing to scrub"
 fi
 
 if [ "$mounted_here" -eq 1 ]; then

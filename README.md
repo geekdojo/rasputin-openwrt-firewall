@@ -160,7 +160,19 @@ RASPUTIN_NODE_ROLE=firewall
 RASPUTIN_NATS_URL=nats://rasputin.local:4222
 RASPUTIN_CP_JOIN_TOKEN=...            # minted by the controlplane
 RASPUTIN_SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop"  # optional; quote it — your SSH key
+RASPUTIN_BUS_PIN=sha256/...           # the controlplane's bus key pin; unquoted
 ```
+
+`RASPUTIN_BUS_PIN` makes the agent dial the bus over TLS and accept only the
+controlplane key it names. It is public, the controlplane puts it in every
+seed it makes, and it must be copied exactly (`sha256/` plus 44 characters of
+base64 ending in `=`): a malformed pin makes `apply-seed` stop and apply
+nothing, with the reason in `logread`. Without a pin the agent dials in
+plaintext until the controlplane delivers one. `RASPUTIN_BUS_KEY` (the bus
+*private* key) belongs only in the controlplane's own seed; a firewall ignores
+it, logs a warning and blanks it. The full contract is
+[`docs/bus-tls-contract.md`](https://github.com/geekdojo/rasputin-control-plane/blob/main/docs/bus-tls-contract.md)
+in rasputin-control-plane.
 
 On first boot the uci-defaults one-shots harden SSH to key-only, stage the
 ESP seed (if present), assign WAN/LAN ports (eth1 = WAN, eth0 = LAN on the

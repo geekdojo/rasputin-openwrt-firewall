@@ -79,6 +79,7 @@ files/etc/uci-defaults/99-rasputin
 files/etc/uci-defaults/98-rasputin-seed
 files/usr/lib/rasputin/apply-seed
 files/usr/lib/rasputin/node-id.sh
+files/usr/lib/rasputin/bus-pin.sh
 files/usr/lib/rasputin/seed-fat-device
 files/usr/lib/rasputin/scrub-seed-token
 files/etc/sysctl.d/99-rasputin-no-ipv6.conf
