@@ -39,8 +39,9 @@
 #
 # Rule updates ride image releases (sysupgrade cadence); per-deployment
 # rule pushes are a backlog item. To re-pin: the mirror must already hold
-# sha256-<new sha> (its refresh job verifies and publishes it); then set
-# PINNED_SHA below, add a history entry, and run this script — it must print
+# sha256-<new sha> — its refresh workflow verifies and publishes it:
+#   gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror
+# Then set PINNED_SHA below, add a history entry, and run this script — it must print
 # "sha256 verified".
 #
 # Usage:

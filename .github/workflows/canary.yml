@@ -459,7 +459,7 @@ jobs:
               echo "| Upstream today | \`${{ steps.rules.outputs.rules_actual_sha }}\` |"
               echo
               if [ "${{ steps.rules.outputs.rules_mirror_status }}" != "present" ]; then
-                echo "**The mirror does not hold upstream's tarball yet** (status: \`${{ steps.rules.outputs.rules_mirror_status }}\`). Refresh [geekdojo/rasputin-snort3-rules-mirror](https://github.com/geekdojo/rasputin-snort3-rules-mirror/actions) first and wait for release \`sha256-${{ steps.rules.outputs.rules_actual_sha }}\` to exist — builds fetch from the mirror, so a pin it does not hold breaks every build."
+                echo "**The mirror does not hold upstream's tarball yet** (status: \`${{ steps.rules.outputs.rules_mirror_status }}\`). Refresh the mirror first (\`gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror\`) and wait for release \`sha256-${{ steps.rules.outputs.rules_actual_sha }}\` to exist — builds fetch from the mirror, so a pin it does not hold breaks every build."
                 echo
               fi
               echo "Remediation — once the mirror holds it: bump the pin, verify, commit:"

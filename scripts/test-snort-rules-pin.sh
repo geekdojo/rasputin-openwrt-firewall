@@ -225,17 +225,20 @@ has gate-stale-mirror-has "prints the pinned SHA" "pinned (PINNED_SHA): $PIN"
 has gate-stale-mirror-has "prints the upstream SHA" "upstream today:      $NEWER"
 has gate-stale-mirror-has "says the mirror already has it, re-pin now" "mirror: ALREADY HAS sha256-$NEWER (HTTP 200) — re-pin now"
 hasnt gate-stale-mirror-has "does not say refresh the mirror" "refresh the mirror FIRST"
+hasnt gate-stale-mirror-has "does not print the refresh command" "rasputin-refresh.yml"
 
 rm -rf "$WWW/mirror/sha256-$NEWER"
 run gate-stale-mirror-lacks 1 "$t/scripts/rasputin-snort-rules-freshness.sh"
 has gate-stale-mirror-lacks "prints the pinned SHA" "pinned (PINNED_SHA): $PIN"
 has gate-stale-mirror-lacks "prints the upstream SHA" "upstream today:      $NEWER"
 has gate-stale-mirror-lacks "says refresh the mirror first" "mirror: does NOT have sha256-$NEWER yet (HTTP 404) — refresh the mirror FIRST"
+has gate-stale-mirror-lacks "names the exact refresh command" "    gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror"
 hasnt gate-stale-mirror-lacks "does not say re-pin now" "re-pin now"
 
 # The mirror cannot be asked at all (nothing listens on port 9 of localhost here).
 run gate-stale-mirror-unknown 1 env SNORT_RULES_MIRROR_BASE="http://127.0.0.1:9/mirror" "$t/scripts/rasputin-snort-rules-freshness.sh"
 has gate-stale-mirror-unknown "says it could not tell" "mirror: could not tell whether it has sha256-$NEWER"
+has gate-stale-mirror-unknown "names the exact refresh command" "    gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror"
 
 rm -f "$WWW/upstream/snort3-community-rules.tar.gz"
 run gate-upstream-unreachable 1 "$t/scripts/rasputin-snort-rules-freshness.sh"

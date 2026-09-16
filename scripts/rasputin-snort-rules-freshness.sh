@@ -53,7 +53,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPSTREAM_URL="${SNORT_RULES_UPSTREAM_URL:-https://www.snort.org/downloads/community/snort3-community-rules.tar.gz}"
-MIRROR_ACTIONS_URL="https://github.com/geekdojo/rasputin-snort3-rules-mirror/actions"
+MIRROR_REFRESH_CMD="gh workflow run rasputin-refresh.yml --repo geekdojo/rasputin-snort3-rules-mirror"
 REPORT="${REPORT_DRIFT:-0}"
 
 pin_out="$("$SCRIPT_DIR/fetch-snort-rules.sh" --print-pin)" || {
@@ -139,13 +139,14 @@ fi
 			;;
 		absent)
 			echo "  mirror: does NOT have sha256-$upstream_sha yet (HTTP 404) — refresh the mirror FIRST:"
-			echo "    run the refresh workflow at $MIRROR_ACTIONS_URL"
+			echo "    $MIRROR_REFRESH_CMD"
 			echo "    and wait for release sha256-$upstream_sha to exist; only then re-pin."
 			echo "    Re-pinning before the mirror holds the SHA breaks every build."
 			;;
 		*)
 			echo "  mirror: could not tell whether it has sha256-$upstream_sha (HTTP ${http_code:-none})."
-			echo "    Check $mirror_url by hand: if it downloads, re-pin; if not, refresh the mirror first."
+			echo "    Check $mirror_url by hand: if it downloads, re-pin; if not, refresh the mirror first:"
+			echo "    $MIRROR_REFRESH_CMD"
 			;;
 	esac
 } >&3
