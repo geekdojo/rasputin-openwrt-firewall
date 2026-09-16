@@ -24,11 +24,10 @@ start_service() {
 
 	# If the operator hasn't filled the seed yet, log + back off — procd
 	# will respawn on the configured cadence. Avoid a tight crash loop.
-	# Only nats_url gates startup. The controlplane's bus requires a join
-	# token by default (RASPUTIN_BUS_AUTH=enforce) and accepts any connection
-	# when run with RASPUTIN_BUS_AUTH=off, so the bus decides, not this gate.
-	# (A token without a node id never gets this far: apply-seed refuses
-	# that seed.)
+	# nats_url and node_id gate startup; the join token does not. The
+	# controlplane's bus requires a join token by default
+	# (RASPUTIN_BUS_AUTH=enforce) and accepts any connection when run with
+	# RASPUTIN_BUS_AUTH=off, so the bus decides, not this gate.
 	if [ -z "$nats_url" ]; then
 		# No seed yet (fresh flash, pre-provision). Open NO procd instance and
 		# return cleanly. Do not `sleep 60; exit 1`: start_service isn't a
@@ -39,13 +38,22 @@ start_service() {
 		logger -t rasputin-agent "seed not configured (nats_url blank); not starting until seeded"
 		return 0
 	fi
+	# No node id: never start. The agent's own default id is the same literal
+	# on every box, and this box never makes one up — the id is assigned by the
+	# control plane and arrives in the seed (geekdojo/geekdojo-brain#423).
+	# apply-seed refuses a seed without one, so this only trips on a UCI
+	# config edited by hand, or one written before that check.
+	if [ -z "$node_id" ]; then
+		logger -t rasputin-agent "no node id (rasputin.main.node_id blank); not starting. Add RASPUTIN_NODE_ID to /etc/rasputin/seed.env and run /usr/lib/rasputin/apply-seed"
+		return 0
+	fi
 
 	procd_open_instance
 	procd_set_param command /usr/bin/rasputin-agent
 	procd_append_param env RASPUTIN_NODE_ROLE="$node_role"
 	procd_append_param env RASPUTIN_NATS_URL="$nats_url"
 	procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
-	[ -n "$node_id" ] && procd_append_param env RASPUTIN_NODE_ID="$node_id"
+	procd_append_param env RASPUTIN_NODE_ID="$node_id"
 	# The cluster's name, which the agent turns into "<cluster-id>.local" for
 	# hostsync. Always passed (with a default) rather than conditionally: an
 	# unset value here would leave the agent deriving its own default, which is

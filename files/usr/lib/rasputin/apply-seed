@@ -4,19 +4,20 @@
 # /etc/config/rasputin (the UCI config the agent reads).
 #
 # Three call sites:
-#   - First-boot uci-defaults/99-rasputin (runs once, may have blank seed).
+#   - First-boot uci-defaults/99-rasputin (runs once, may have no seed yet).
 #   - Operator workflow: edit /etc/rasputin/seed.env then run this script.
 #   - Controlplane bootstrap_firewall job: pushes the seed, then runs this
 #     remotely via the agent.
 #
-# Idempotent. Blank values are valid — the agent polls and waits when
-# nats_url or join_token is empty.
+# Idempotent. A box that is not seeded yet (no seed, or a seed with no node id,
+# NATS URL or join token) is a no-op for /etc/config/rasputin and exits 0; the
+# agent waits for a seed. See the node id section.
 #
 # Exits 1, having applied nothing to /etc/config/rasputin, when the seed
 # carries a value that cannot be used as written: an invalid RASPUTIN_NODE_ID,
-# a join token with no RASPUTIN_NODE_ID, or an invalid RASPUTIN_BUS_PIN. The
-# SSH key is applied before those checks on purpose — it is how the operator
-# gets in to fix the seed.
+# a NATS URL or join token with no RASPUTIN_NODE_ID, or an invalid
+# RASPUTIN_BUS_PIN. The SSH key is applied before those checks on purpose — it
+# is how the operator gets in to fix the seed.
 
 set -eu
 
@@ -48,7 +49,7 @@ if [ -f "$SEED" ]; then
 	. "$SEED"
 	logger -t rasputin "apply-seed: loaded seed from $SEED"
 else
-	logger -t rasputin "apply-seed: $SEED not found; writing blank config (agent polls)"
+	logger -t rasputin "apply-seed: $SEED not found"
 fi
 
 # shellcheck source=/dev/null
@@ -173,88 +174,67 @@ fi
 # --- node id ---------------------------------------------------------------
 # The id is the NATS username the agent presents to the bus, and the control
 # plane accepts only a DNS label: 1-63 characters of a-z, 0-9 and '-', not
-# starting or ending with '-'. The helpers and the reasoning behind the two
-# behaviours below live in node-id.sh.
+# starting or ending with '-'. The helpers live in node-id.sh.
 # shellcheck source=/dev/null
 . /usr/lib/rasputin/node-id.sh
 
-# A provisioning matched set ASSIGNS the node id in the seed and binds the
-# join token to it (token-provisioning-pipeline.md §3), and the bus refuses a
-# token presented under any other id — an unbound token no longer exists
-# (rasputin-control-plane #318, geekdojo/geekdojo-brain#423). So a seed with a
-# join token MUST name the node: an id derived on this box could never match the
-# token, and the box would look provisioned and never join. Every real
-# provisioning path (rasputin-provision, the Add-node wizard) writes it. Fail
-# before /etc/config/rasputin is touched, like an invalid id below.
+# The node id always comes from the seed; this box never makes one up
+# (geekdojo/geekdojo-brain#423). A provisioning matched set ASSIGNS it and
+# binds the join token to it (token-provisioning-pipeline.md §3), and the bus
+# refuses a token presented under any other id, so an id made up here could
+# never join. Every real provisioning path (rasputin-provision, the Add-node
+# wizard) writes it. Without a token there is still nothing to make one up
+# for: an id this box invented would be one the control plane never assigned.
 #
-# Only a seed with NO join token still gets a derived id (the else branch): a
-# blank or sealed seed, where the agent waits for a NATS URL, or a bus running
-# with RASPUTIN_BUS_AUTH=off, which accepts any username. There the id only has
-# to be stable and unique per box, and no token has to agree with it.
+# Two outcomes when the seed has no id:
+#   - NOT SEEDED YET: no seed file, or a seed with no node id, no NATS URL and
+#     no join token (a sealed image, or a seed that only carries the operator's
+#     SSH key so they can get in). Nothing is written to /etc/config/rasputin
+#     and this exits 0: the box simply waits for a real seed, and a box that
+#     was already provisioned keeps its working config. The agent does not
+#     start without a node id (init.d/rasputin-agent), so it never runs under
+#     the agent's own default id.
+#   - A SEED WITHOUT AN ID: it names a NATS URL or a join token but no node id.
+#     That is a hand-written or botched seed; fail loud.
 #
 # A seed id is lowercased and trimmed, exactly as rasputin-provision does, and
 # then must already be valid. It is NOT rewritten into something valid: the
 # token is bound to the id the operator chose, so a substituted id could never
-# join and would hide why. Fail instead — before /etc/config/rasputin is
-# touched, so a box that was already provisioned keeps its working config and
-# a fresh one stays unprovisioned (99-rasputin then also leaves the token on
-# the seed FAT). The SSH key above has already been applied on purpose: it is
-# how the operator gets in to read this and fix the seed.
+# join and would hide why. Every failure here happens before
+# /etc/config/rasputin is touched, so a box that was already provisioned keeps
+# its working config and a fresh one stays unprovisioned (99-rasputin then also
+# leaves the token on the seed FAT). The SSH key above has already been applied
+# on purpose: it is how the operator gets in to read this and fix the seed.
 NODE_ID=$(rasputin_label_canon "${RASPUTIN_NODE_ID:-}")
-if [ -z "$NODE_ID" ] && [ -n "$(rasputin_seed_trim "${RASPUTIN_CP_JOIN_TOKEN:-}")" ]; then
+if [ -z "$NODE_ID" ]; then
+	if [ -z "$(rasputin_seed_trim "${RASPUTIN_NATS_URL:-}")" ] \
+		&& [ -z "$(rasputin_seed_trim "${RASPUTIN_CP_JOIN_TOKEN:-}")" ]; then
+		msg="apply-seed: not seeded yet ($SEED has no node id, NATS URL or join token); nothing applied to /etc/config/rasputin, and the agent waits for a seed"
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+		exit 0
+	fi
 	for msg in \
-		"apply-seed: ERROR: $SEED carries a join token (RASPUTIN_CP_JOIN_TOKEN) but no RASPUTIN_NODE_ID." \
-		"apply-seed: a join token is bound to the node id it was issued for, so this box cannot join under an id of its own." \
-		"apply-seed: nothing was applied. Add RASPUTIN_NODE_ID to $SEED (the id the token was issued for), or re-generate the seed with Add node / rasputin-provision, and run /usr/lib/rasputin/apply-seed again."
+		"apply-seed: ERROR: $SEED has no RASPUTIN_NODE_ID." \
+		"apply-seed: every seed must name the node: a join token is bound to the node id it was issued for, and this box never makes one up." \
+		"apply-seed: nothing was applied. Add RASPUTIN_NODE_ID to $SEED (the id the control plane assigned), or re-generate the seed with Add node / rasputin-provision, and run /usr/lib/rasputin/apply-seed again."
 	do
 		logger -t rasputin "$msg"
 		printf '%s\n' "$msg" >&2
 	done
 	exit 1
 fi
-if [ -n "$NODE_ID" ]; then
-	if ! rasputin_label_valid "$NODE_ID"; then
-		for msg in \
-			"apply-seed: ERROR: RASPUTIN_NODE_ID '$RASPUTIN_NODE_ID' in $SEED is not a valid node id." \
-			"apply-seed: a node id must be 1-63 characters of a-z, 0-9 and -, and must not start or end with -." \
-			"apply-seed: nothing was applied. Fix RASPUTIN_NODE_ID in $SEED (it must match the id the join token was issued for) and run /usr/lib/rasputin/apply-seed again."
-		do
-			logger -t rasputin "$msg"
-			printf '%s\n' "$msg" >&2
-		done
-		exit 1
-	fi
-else
-	# No token, so no id the token must match. Pick a stable per-box node_id. DMI serials are the right thing IF the
-	# board vendor actually filled them in; rasputin_dmi_node_id skips the
-	# placeholder strings many boards ship and normalizes a real serial into a
-	# valid id (vendor serials are often uppercase and may contain spaces).
-	NODE_ID=$(rasputin_dmi_node_id)
-	# DMI didn't give us anything usable. Fall through to a persistent UUID
-	# we manage ourselves at /etc/rasputin/node-id. OpenWrt doesn't ship
-	# /etc/machine-id (that's a systemd convention; OpenWrt uses procd).
-	# /etc/rasputin/ is in the sysupgrade keep-list (see
-	# files/lib/upgrade/keep.d/rasputin) so this id is stable across reboots
-	# AND across sysupgrade, but regenerates on a true re-flash (overlay
-	# wiped). That's exactly the identity semantics we want — same box +
-	# same install = same node_id; different box OR fresh re-flash = new
-	# identity. The kernel's /proc/sys/kernel/random/uuid gives us a v4 UUID
-	# without a userspace tool dependency — already a valid id; normalizing
-	# it too keeps the derived path valid by construction.
-	NODE_ID_FILE=/etc/rasputin/node-id
-	if [ -z "$NODE_ID" ]; then
-		if [ ! -s "$NODE_ID_FILE" ]; then
-			mkdir -p "$(dirname "$NODE_ID_FILE")"
-			cat /proc/sys/kernel/random/uuid > "$NODE_ID_FILE" 2>/dev/null || true
-			chmod 0644 "$NODE_ID_FILE" 2>/dev/null || true
-		fi
-		NODE_ID=$(rasputin_label_normalize "$(cat "$NODE_ID_FILE" 2>/dev/null || true)")
-	fi
+if ! rasputin_label_valid "$NODE_ID"; then
+	for msg in \
+		"apply-seed: ERROR: RASPUTIN_NODE_ID '$RASPUTIN_NODE_ID' in $SEED is not a valid node id." \
+		"apply-seed: a node id must be 1-63 characters of a-z, 0-9 and -, and must not start or end with -." \
+		"apply-seed: nothing was applied. Fix RASPUTIN_NODE_ID in $SEED (it must match the id the join token was issued for) and run /usr/lib/rasputin/apply-seed again."
+	do
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+	done
+	exit 1
 fi
-# Belt-and-suspenders for the (vanishingly unlikely) case where even the
-# kernel UUID source failed — leaves the agent startable with a known-
-# bad id rather than crashing on a UCI set with an empty value.
-[ -z "$NODE_ID" ] && NODE_ID="unknown-node-id"
 
 # Ensure /etc/config/rasputin exists. UCI's `commit` writes to an
 # existing file but does NOT create one from scratch on first call —

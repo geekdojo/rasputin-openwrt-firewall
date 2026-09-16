@@ -7,7 +7,8 @@
 #   control plane accepts only a DNS label (1-63 of a-z 0-9 -, no leading or
 #   trailing -). An id that breaks the rule is not caught by the build, the
 #   syntax check or the boot: the box comes up and simply never joins. So the
-#   derivation and the check are pinned here, case by case.
+#   check (and the lowercase/trim applied before it) is pinned here, case by
+#   case. The box never derives an id (geekdojo/geekdojo-brain#423).
 #   geekdojo/geekdojo-brain#441.
 #
 # SHELLS
@@ -35,8 +36,6 @@ fi
 
 pass=0
 fail=0
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
 
 # run SHELL FUNCTION ARG — print the function's output, then "|rc=<status>".
 # The marker keeps an empty output distinguishable from a missing one.
@@ -61,12 +60,7 @@ expect() {
 	fi
 }
 
-long70=abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij
 first63=abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
-# 62 chars then a space: normalizing turns the space into '-' at position 63,
-# which the cut leaves trailing and the final trim must remove.
-hyphen_at_63="abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab cd"
-first62=abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab
 tab=$(printf '\t')
 cr=$(printf '\r')
 nl='
@@ -74,26 +68,6 @@ nl='
 
 for sh in $TEST_SHELLS; do
 	echo "== $sh"
-
-	# ---- rasputin_label_normalize: derived ids --------------------------
-	f=rasputin_label_normalize
-	expect "$sh" "mixed case"            "kitchen-pi|rc=0"   $f "Kitchen-Pi"
-	expect "$sh" "spaces"                "abc-123-xyz|rc=0"  $f "ABC 123 XYZ"
-	expect "$sh" "hyphens trimmed"       "x|rc=0"            $f "--x--"
-	expect "$sh" "70 chars cut to 63"    "$first63|rc=0"     $f "$long70"
-	expect "$sh" "hyphen at 63 trimmed"  "$first62|rc=0"     $f "$hyphen_at_63"
-	expect "$sh" "wildcard only"         "|rc=0"             $f "*"
-	expect "$sh" "gt only"               "|rc=0"             $f ">"
-	expect "$sh" "dot"                   "a-b|rc=0"          $f "a.b"
-	expect "$sh" "empty"                 "|rc=0"             $f ""
-	expect "$sh" "only separators"       "|rc=0"             $f " .-_ "
-	expect "$sh" "already valid"         "node-1a2b3c4d|rc=0" $f "node-1a2b3c4d"
-	expect "$sh" "uuid unchanged"        "3f2b9c1e-8d4a-4c5b-9e6f-0a1b2c3d4e5f|rc=0" $f "3f2b9c1e-8d4a-4c5b-9e6f-0a1b2c3d4e5f"
-	expect "$sh" "runs collapse"         "a-b|rc=0"          $f "a  ..__  b"
-	expect "$sh" "tab, CR, newline"      "a-b-c-d|rc=0"      $f "a${tab}b${cr}c${nl}d"
-	expect "$sh" "non-ASCII"             "caf-1|rc=0"        $f "café 1"
-	expect "$sh" "shell metacharacters"  "a-b-c|rc=0"        $f 'a;$(b)`c`'
-	expect "$sh" "leading dash option"   "n|rc=0"            $f "-n"
 
 	# ---- rasputin_label_canon: operator ids (lowercase + trim only) ------
 	f=rasputin_label_canon
@@ -127,23 +101,6 @@ for sh in $TEST_SHELLS; do
 	expect "$sh" "invalid newline"       "|rc=1"  $f "a${nl}b"
 	expect "$sh" "invalid non-ASCII"     "|rc=1"  $f "café"
 	expect "$sh" "invalid bracket"       "|rc=1"  $f "a[b]"
-
-	# ---- rasputin_dmi_node_id: the DMI walk -------------------------------
-	dmi() {
-		d="$TMP/$1"; rm -rf "$d"; mkdir -p "$d"
-		[ -n "$2" ] && printf '%s\n' "$2" > "$d/board_serial"
-		[ -n "$3" ] && printf '%s\n' "$3" > "$d/product_serial"
-		[ -n "$4" ] && printf '%s\n' "$4" > "$d/chassis_serial"
-		printf '%s' "$d"
-	}
-	f=rasputin_dmi_node_id
-	expect "$sh" "dmi uppercase serial"      "abc-123-xyz|rc=0" $f "$(dmi a "  ABC   123 XYZ " "" "")"
-	expect "$sh" "dmi placeholder skipped"   "pq7|rc=0"         $f "$(dmi b "Default string" "PQ7" "")"
-	expect "$sh" "dmi OEM placeholder"       "cs-9|rc=0"        $f "$(dmi c "To Be Filled By O.E.M." "Not Specified" "CS/9")"
-	expect "$sh" "dmi unusable -> next"      "real1|rc=0"       $f "$(dmi d "***" "Real1" "")"
-	expect "$sh" "dmi nothing usable"        "|rc=0"            $f "$(dmi e "Default string" "..." "None")"
-	expect "$sh" "dmi no files"              "|rc=0"            $f "$(dmi f "" "" "")"
-	expect "$sh" "dmi deterministic"         "abc-123-xyz|rc=0" $f "$(dmi g "ABC 123 XYZ" "" "")"
 done
 
 echo
