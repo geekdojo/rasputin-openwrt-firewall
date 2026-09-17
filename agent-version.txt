@@ -528,4 +528,17 @@
 #                        Rebuild payload on top: #53/#54 (release tag guard) and the
 #                        ImageBuilder feed refresh. No canary issue is open. Snort community
 #                        rules unchanged at c50913e2. OpenWrt base unchanged.
-2026.09.4-dev.165
+#   2026.09.4-dev.166 (2026-09-17): DEV pin -- same bench validation
+#                        (geekdojo/geekdojo-brain#448); the next stable re-pins to the
+#                        bare 2026.09.4. Built from CP 3c63a76 (#325); tag confirmed on
+#                        the built commit by the release guard.
+#                        NO functional agent change for this box. The v2026.09.4-dev.165..
+#                        dev.166 delta is agent/internal/updater only: the RAUC backend's
+#                        commit check names slots from RAUC_SYSTEM_SLOTS (fixes Pi
+#                        controlplanes stuck in bus TLS offer). This image runs the
+#                        openwrt-ab backend, which does not use that code. The tarball
+#                        sha256 differs from dev.165 because of the version stamp.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open. Snort community rules unchanged at c50913e2.
+#                        OpenWrt base unchanged.
+2026.09.4-dev.166
