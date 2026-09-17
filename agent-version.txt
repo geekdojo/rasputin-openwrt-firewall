@@ -541,4 +541,32 @@
 #                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
 #                        issue is open. Snort community rules unchanged at c50913e2.
 #                        OpenWrt base unchanged.
-2026.09.4-dev.166
+#   2026.09.4-dev.167 (2026-09-17): DEV pin -- bench validation of the bus auth
+#                        hardening batch (geekdojo/geekdojo-brain#140, #450, #451, #107);
+#                        the next stable re-pins to the bare 2026.09.4. Built from CP
+#                        0ed4e0b (#326-#329); tag confirmed on the built commit by the
+#                        release guard.
+#                        Agent delta, read from v2026.09.4-dev.166..0ed4e0b:
+#                          - #328: the bus no longer trusts loopback. The agent resolves
+#                            its join token from RASPUTIN_CP_JOIN_TOKEN, else
+#                            RASPUTIN_CP_JOIN_TOKEN_FILE (read on every connect), else
+#                            the api-minted file on a CONTROLPLANE only. This box
+#                            passes the seeded RASPUTIN_CP_JOIN_TOKEN via procd, as
+#                            before, so its token path is unchanged.
+#                          - #329: Caddy's admin API moves to a root-only unix socket.
+#                            The node-local proxy runs only on compute/controlplane
+#                            agents and this image ships no Caddy, so no change here.
+#                          - #326, #327: api-side only (callout JWT expiry test; the
+#                            minted credential loses its _INBOX.> subscribe grant --
+#                            the agent makes no NATS requests, so nothing it does
+#                            needs that grant).
+#                          - No go.mod / go.sum change.
+#                        Nothing else in this image needs to move with the pin.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open. Snort community rules pin NOT moved here
+#                        (c50913e2), but upstream's Last-Modified is now 2026-09-17
+#                        13:03 UTC and the mirror's newest release is still c50913e2,
+#                        so a publish dispatch's freshness gate is expected to fail
+#                        until the mirror is refreshed and PINNED_SHA re-pinned.
+#                        OpenWrt base unchanged.
+2026.09.4-dev.167
