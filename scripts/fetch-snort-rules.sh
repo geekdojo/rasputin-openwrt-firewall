@@ -151,7 +151,17 @@ TARBALL_NAME="snort3-community-rules.tar.gz"
 # pre-flight — so upstream moving between the pre-flight and the tag no longer
 # changes what the tag builds. Re-pins still happen at upstream's cadence, but
 # they are caught at pre-flight, where re-pinning is cheap.
-PINNED_SHA="c50913e2153c926fa32bfb897494d1f92ba70d01bfc202e4b22bdbd362c8f9d3"
+# -> ae74ed6dc03a... (2026-09-17, 4017 active rules; a Talos republish). It
+# went live on snort.org at 2026-09-17 13:03 UTC (the S3 object's
+# Last-Modified); its gzip header reads 2026-09-16 22:36 UTC, the archive
+# build time. Found while preparing the 2026.09.4-dev.167 agent pin, before
+# any build failed on it. Two separate HTTPS downloads hashed identical
+# before the refresh ran; the mirror's rasputin-refresh.yml then verified it
+# (two downloads, five-member layout, 4017 active rules, snort-mgr -v check
+# under Snort 3.10.0.0 in firewall 2026.09.3) and published
+# sha256-ae74ed6dc03a..., the first mirror entry tagged by its release-target
+# guard.
+PINNED_SHA="ae74ed6dc03a95cda54931de284d1b73c5dbe660deec02c2e080f904a82303a0"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
