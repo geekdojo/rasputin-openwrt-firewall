@@ -69,6 +69,7 @@ scripts/fetch-snort-rules.sh
 scripts/rasputin-snort-rules-freshness.sh
 scripts/rasputin-snort-rules-check.sh
 scripts/rasputin-release-tag-guard.sh
+scripts/release-target-guard.sh
 scripts/assemble-ab-image.sh
 scripts/validate-files.sh
 image/grub.cfg

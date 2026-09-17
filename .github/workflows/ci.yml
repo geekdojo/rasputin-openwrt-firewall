@@ -20,7 +20,8 @@
 ##   check that disagrees with itself is worse than no check.
 ##   Plus the behavioural tests release.yml's validate job also runs:
 ##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-seed-scrub.sh,
-##   scripts/test-snort-rules-pin.sh and scripts/test-release-tag-guard.sh.
+##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh and
+##   scripts/test-release-target-guard.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -132,6 +133,14 @@ jobs:
       - name: Tag guard tests
         timeout-minutes: 5
         run: ./scripts/test-release-tag-guard.sh
+
+      # release.yml's publish step runs scripts/release-target-guard.sh before
+      # and after `gh release create` to prove the tag is on the commit the
+      # image was built from. Every exit status, against a throwaway git remote
+      # with lightweight, annotated and nested tags. No network.
+      - name: Release target guard tests
+        timeout-minutes: 5
+        run: ./scripts/test-release-target-guard.sh
 
   apply-seed:
     name: Seed to agent environment (functional)
