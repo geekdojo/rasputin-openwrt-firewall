@@ -515,4 +515,17 @@
 #                        on every seed) and the ImageBuilder feed refresh. No canary issue
 #                        is open. Snort community rules unchanged at c50913e2 (upstream
 #                        Last-Modified still 2026-09-16 01:30 UTC). OpenWrt base unchanged.
-2026.09.4-dev.164
+#   2026.09.4-dev.165 (2026-09-17): DEV pin -- same bench validation as dev.164
+#                        (geekdojo/geekdojo-brain#448, #423, #247); the next stable
+#                        re-pins to the bare 2026.09.4. Built from CP f9ad692, whose tag
+#                        the new release guard (CP #323) confirmed is on the built commit.
+#                        NO functional agent change from dev.164: v2026.09.4-dev.164..f9ad692
+#                        touches no file under agent/; proto/agentverbs.go moves only the
+#                        api's floor table (bus.pin, busTls, BootCommitted -> dev.164, #324).
+#                        The payload is api-side (#324: bus TLS reaches require without
+#                        restarting the api). The tarball sha256 differs from dev.164
+#                        because of the version stamp (-X main.AgentVersion).
+#                        Rebuild payload on top: #53/#54 (release tag guard) and the
+#                        ImageBuilder feed refresh. No canary issue is open. Snort community
+#                        rules unchanged at c50913e2. OpenWrt base unchanged.
+2026.09.4-dev.165
