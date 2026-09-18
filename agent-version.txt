@@ -569,4 +569,20 @@
 #                        so a publish dispatch's freshness gate is expected to fail
 #                        until the mirror is refreshed and PINNED_SHA re-pinned.
 #                        OpenWrt base unchanged.
-2026.09.4-dev.167
+#   2026.09.4-dev.168 (2026-09-18): DEV pin -- keeps the firewall on the same CP
+#                        release as the OS image (geekdojo/geekdojo-brain#453, #140);
+#                        the next stable re-pins to the bare 2026.09.4. Built from CP
+#                        2b0bd8c (#330, #331); tag confirmed on the built commit by the
+#                        release guard.
+#                        NO agent change: v2026.09.4-dev.167..2b0bd8c touches nothing
+#                        under agent/ or proto/. #330 (the controlplane agent's token
+#                        cannot be revoked) and #331 (Grafana on a root-only unix
+#                        socket, no initial admin, controlplane Alloy publish removed,
+#                        pprof off) are api-side; the per-node Alloy collector the api
+#                        deploys does not run here (no Docker on this box). The
+#                        tarball sha256 differs from dev.167 because of the version stamp.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open. Snort community rules current at ae74ed6d (#58;
+#                        upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
+#                        unchanged.
+2026.09.4-dev.168
