@@ -585,4 +585,18 @@
 #                        issue is open. Snort community rules current at ae74ed6d (#58;
 #                        upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
 #                        unchanged.
-2026.09.4-dev.168
+#   2026.09.4-dev.169 (2026-09-18): DEV pin -- keeps the firewall on the same CP
+#                        release as the OS image, for bench validation of the Grafana
+#                        dashboard fixes (control-plane #332, #333); the next stable
+#                        re-pins to the bare 2026.09.4. Built from CP fbf0397; tag
+#                        confirmed on the built commit by the release guard.
+#                        NO agent change: v2026.09.4-dev.168..fbf0397 touches nothing
+#                        under agent/ or proto/ -- it is api/internal/obs (Grafana
+#                        datasource uids, provisioning-change recreate, dashboard node
+#                        filter) plus tests and CI. The tarball sha256 differs from
+#                        dev.168 because of the version stamp.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open. Snort community rules current at ae74ed6d
+#                        (upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
+#                        unchanged.
+2026.09.4-dev.169
