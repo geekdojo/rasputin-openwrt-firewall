@@ -612,4 +612,19 @@
 #                        issue is open. Snort community rules current at ae74ed6d
 #                        (upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
 #                        unchanged.
-2026.09.4-dev.170
+#   2026.09.4-dev.171 (2026-09-19): DEV pin -- keeps the firewall on the same CP
+#                        release as the OS image, for bench validation of E21 Step 1A
+#                        (control-plane #335-#346); the next stable re-pins to the bare
+#                        2026.09.4. Built from CP 13e229a; tag confirmed on the built
+#                        commit by the release guard.
+#                        NO agent change: v2026.09.4-dev.170..13e229a touches nothing
+#                        under agent/, and proto/ only in comments (alerts.go, mesh.go).
+#                        The rest is api-side (auth, busauth join-token roles and
+#                        tombstones, mesh pre-auth mint, job-ledger secrets, alerts read
+#                        from VictoriaMetrics) plus ui and tests. The tarball sha256
+#                        differs from dev.170 because of the version stamp.
+#                        Rebuild payload on top: the ImageBuilder feed refresh. No canary
+#                        issue is open. Snort community rules current at ae74ed6d
+#                        (upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
+#                        unchanged.
+2026.09.4-dev.171
