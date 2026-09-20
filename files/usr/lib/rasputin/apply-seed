@@ -44,9 +44,78 @@ RASPUTIN_BUS_PIN=
 # whether the seed carried one.
 RASPUTIN_BUS_KEY=
 
-if [ -f "$SEED" ]; then
+# --- read the seed THROUGH the agent, not as a shell script -------------------
+#
+# The seed is a file an operator wrote — on the RASPUTIN-FW volume, or pushed
+# over SSH — and this line SOURCED it as root: whatever it said, the box ran
+# (geekdojo/geekdojo-brain#540, F18). `rasputin-agent seed check` replaces that.
+# It PARSES the file (KEY=VALUE, one layer of quoting, not an interpreter),
+# refuses one it cannot use, and prints a normalized copy with every value
+# single-quoted. What is sourced below is that output, which this image's own
+# binary wrote.
+#
+# The three exit statuses are the contract:
+#   0  checked. Source the normalized copy.
+#   1  the seed is unusable, and stdout is empty. The agent has named the field
+#      and what to do; apply-seed exits 1 having applied nothing, which is what
+#      it already does for a bad node id or a bad pin.
+#   2  a usage error — on this path, an agent that predates the subcommand. So
+#      is a missing binary.
+#
+# MIXED FLEETS. This image pins its agent (agent-version.txt) and that pin
+# lags the control plane on purpose, so an image WILL exist whose agent has
+# never heard of `seed check`. Case 2 falls back to sourcing the seed exactly
+# as before and says so in the log: a firewall must not fail to provision
+# because its agent is a release behind. The fallback is transitional and goes
+# on a checkable fact — when every shipped image carries an agent that answers
+# `seed check`.
+#
+# --role firewall is passed because this image can only ever BE a firewall: a
+# seed naming another role is one that belongs to another node, and saying so
+# here beats a box that enrols as something it cannot be.
+AGENT_BIN="${RASPUTIN_APPLY_SEED_AGENT:-/usr/bin/rasputin-agent}"
+SEED_CHECKED="${RASPUTIN_APPLY_SEED_CHECKED:-/tmp/rasputin-seed.checked}"
+
+seed_source() {
+	_ss_rc=0
+	if [ -x "$AGENT_BIN" ]; then
+		rm -f "$SEED_CHECKED" "$SEED_CHECKED.err"
+		(umask 077 && "$AGENT_BIN" seed check --role firewall "$1" > "$SEED_CHECKED" 2>"$SEED_CHECKED.err") || _ss_rc=$?
+		case "$_ss_rc" in
+			0)
+				# shellcheck disable=SC1090
+				. "$SEED_CHECKED"
+				rm -f "$SEED_CHECKED" "$SEED_CHECKED.err"
+				logger -t rasputin "apply-seed: seed checked by $AGENT_BIN; loaded the normalized copy"
+				return 0
+				;;
+			1)
+				while IFS= read -r _ss_line; do
+					logger -t rasputin "apply-seed: $_ss_line"
+					printf '%s\n' "$_ss_line" >&2
+				done < "$SEED_CHECKED.err"
+				rm -f "$SEED_CHECKED" "$SEED_CHECKED.err"
+				return 1
+				;;
+			*)
+				logger -t rasputin "apply-seed: $AGENT_BIN does not support 'seed check' (exit $_ss_rc) — this image's agent predates it; reading the seed directly"
+				;;
+		esac
+		rm -f "$SEED_CHECKED" "$SEED_CHECKED.err"
+	else
+		logger -t rasputin "apply-seed: no agent at $AGENT_BIN — reading the seed directly"
+	fi
 	# shellcheck disable=SC1090
-	. "$SEED"
+	. "$1"
+}
+
+if [ -f "$SEED" ]; then
+	if ! seed_source "$SEED"; then
+		msg="apply-seed: the seed at $SEED cannot be used; nothing applied. Re-generate it from the control plane (Add node) and re-seed."
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+		exit 1
+	fi
 	logger -t rasputin "apply-seed: loaded seed from $SEED"
 else
 	logger -t rasputin "apply-seed: $SEED not found"
