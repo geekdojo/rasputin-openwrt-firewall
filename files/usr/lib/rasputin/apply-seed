@@ -265,16 +265,76 @@ if [ -n "$BUS_PIN" ]; then
 		logger -t rasputin "apply-seed: replacing bus pin $old_pin with $BUS_PIN from $SEED"
 	fi
 fi
+
+# --- the join token: its own 0600 file, never a UCI value -------------------
+# geekdojo/geekdojo-brain#537 (auth methodology §5.2 and §7 4.1). The token was
+# written to rasputin.main.join_token, from where init.d handed it to the agent
+# as RASPUTIN_CP_JOIN_TOKEN. Two problems with that, and one file fixes both:
+#
+#   - /etc/config/rasputin is a world-readable config file, and procd puts the
+#     value into the agent's ENVIRONMENT, which every child the agent spawns
+#     inherits and which /proc exposes to anything running as the same user. A
+#     credential belongs in a file its owner alone can read.
+#   - An environment variable cannot change under a running process. The agent
+#     re-reads the token FILE on every connect attempt, so a token that is
+#     rotated or re-minted reaches a running agent on its next reconnect
+#     instead of its next restart.
+#
+# The value is written to JOIN_TOKEN_FILE and UCI carries only its PATH. The
+# write happens before the UCI batch and a failure exits 1, like every other
+# refusal in this script: a box whose token never landed cannot join, and
+# applying the rest would provision it into exactly that state silently.
+#
+# A seed with no token removes the file, which is what the old code did when it
+# wrote an empty rasputin.main.join_token — the seed remains the source of
+# record for the token, exactly as before. (The bus pin deliberately behaves
+# the other way; see its block above.)
+JOIN_TOKEN_FILE=/etc/rasputin/join.token
+JOIN_TOKEN=$(rasputin_seed_trim "${RASPUTIN_CP_JOIN_TOKEN:-}")
+if [ -n "$JOIN_TOKEN" ]; then
+	jt_tmp="$JOIN_TOKEN_FILE.tmp.$$"
+	rm -f "$jt_tmp" 2>/dev/null || true
+	if ! { mkdir -p /etc/rasputin \
+		&& (umask 077 && printf '%s\n' "$JOIN_TOKEN" > "$jt_tmp") \
+		&& chmod 600 "$jt_tmp" \
+		&& mv -f "$jt_tmp" "$JOIN_TOKEN_FILE"; }; then
+		rm -f "$jt_tmp" 2>/dev/null || true
+		for msg in \
+			"apply-seed: ERROR: could not write the join token to $JOIN_TOKEN_FILE." \
+			"apply-seed: nothing was applied to /etc/config/rasputin. Check that /etc/rasputin is writable and run /usr/lib/rasputin/apply-seed again."
+		do
+			logger -t rasputin "$msg"
+			printf '%s\n' "$msg" >&2
+		done
+		exit 1
+	fi
+	logger -t rasputin "apply-seed: wrote the join token to $JOIN_TOKEN_FILE (0600)"
+else
+	rm -f "$JOIN_TOKEN_FILE" 2>/dev/null || true
+fi
+
 uci -q batch <<EOF
 set rasputin.main='rasputin'
 set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
 set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
-set rasputin.main.join_token='${RASPUTIN_CP_JOIN_TOKEN:-}'
+set rasputin.main.join_token_file='${JOIN_TOKEN_FILE}'
 set rasputin.main.node_id='${NODE_ID}'
 set rasputin.main.cluster_id='${RASPUTIN_CLUSTER_ID:-rasputin}'
 ${BUS_PIN_UCI}
 commit rasputin
 EOF
+
+# The legacy option, dropped in its own statement rather than in the batch
+# above: `delete` fails when the option is not there, and UCI's batch aborts
+# silently on a failed delete — the same trap the `set`s avoid by not opening
+# with a defensive `delete rasputin.main` (see the note above). A box seeded
+# before #537 loses the token from its config file here; it is in
+# JOIN_TOKEN_FILE, and in seed.env, which is where it has always come from.
+if [ -n "$(uci -q get rasputin.main.join_token 2>/dev/null || true)" ]; then
+	logger -t rasputin "apply-seed: moved the join token out of /etc/config/rasputin into $JOIN_TOKEN_FILE"
+fi
+uci -q delete rasputin.main.join_token 2>/dev/null || true
+uci -q commit rasputin 2>/dev/null || true
 
 # (Re)start the agent so a freshly-seeded box comes up without a manual start.
 # `restart` = stop (a harmless no-op if already down) + start, so it brings the

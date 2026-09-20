@@ -33,6 +33,14 @@
 #     - a box not seeded yet (no seed, a blank one, an SSH-key-only one) is a
 #       no-op: nothing written, no id minted, the agent not started;
 #     - the agent never starts from a UCI config with no node id.
+#   And for the join token's own file (geekdojo/geekdojo-brain#537):
+#     - the token reaches /etc/rasputin/join.token at mode 600 and NOT
+#       /etc/config/rasputin, which carries only its path;
+#     - the agent is handed RASPUTIN_CP_JOIN_TOKEN_FILE and the token value is
+#       nowhere in its environment;
+#     - a box seeded before this — the token still in UCI — is migrated by the
+#       agent's own init script on its next start, once, with no commit loop;
+#     - sysupgrade's file list keeps the token file.
 #
 # HOW
 #   1. rootfs-0 of a firewall A/B image is unsquashed (the latest STABLE
@@ -159,6 +167,10 @@ mount -t tmpfs -o size=64m tmpfs "$ROOT/tmp" && MOUNTS+=("$ROOT/tmp") || { echo 
 # ---------------------------------------------------------------- helpers
 SEED="$ROOT/etc/rasputin/seed.env"
 UCI="$ROOT/etc/config/rasputin"
+# The join token's own 0600 file: the path as the box sees it, and as this
+# harness sees it from outside the chroot (geekdojo/geekdojo-brain#537).
+JOIN_TOKEN_FILE=/etc/rasputin/join.token
+TOKEN_FILE="$ROOT$JOIN_TOKEN_FILE"
 
 # in_chroot CMD... — bounded: nothing here should take more than seconds, and
 # a wait with no deadline is a bug.
@@ -190,7 +202,7 @@ agent_env() {
 uci_get() { in_chroot /sbin/uci -q get "$1"; }
 
 # reset — a fresh box: no UCI config, no seed.
-reset() { rm -f "$UCI" "$SEED" "$SEED".tmp.*; }
+reset() { rm -f "$UCI" "$SEED" "$SEED".tmp.* "$TOKEN_FILE" "$TOKEN_FILE".tmp.*; }
 
 base_seed() {
 	cat <<'EOF'
@@ -412,10 +424,15 @@ for tokcase in token tokenless; do
 	else
 		bad "$tokcase: apply-seed exit $APPLY_RC"; sed 's/^/      /' "$WORK/with-id.err" >&2
 	fi
-	if [ "$(uci_get rasputin.main.node_id)" = fw-test-1 ] && [ "$(uci_get rasputin.main.join_token)" = "$want_token" ]; then
-		ok "$tokcase: UCI carries the seed's node id and token"
+	if [ "$(uci_get rasputin.main.node_id)" = fw-test-1 ] && [ "$(uci_get rasputin.main.join_token_file)" = "$JOIN_TOKEN_FILE" ]; then
+		ok "$tokcase: UCI carries the seed's node id and the join-token file path"
 	else
-		bad "$tokcase: UCI node_id '$(uci_get rasputin.main.node_id)', join_token '$(uci_get rasputin.main.join_token)'"
+		bad "$tokcase: UCI node_id '$(uci_get rasputin.main.node_id)', join_token_file '$(uci_get rasputin.main.join_token_file)'"
+	fi
+	if [ "$(cat "$TOKEN_FILE" 2>/dev/null || true)" = "$want_token" ]; then
+		ok "$tokcase: the token file holds the seed's token (empty seed -> no file)"
+	else
+		bad "$tokcase: $JOIN_TOKEN_FILE = '$(cat "$TOKEN_FILE" 2>/dev/null || true)', want '$want_token'"
 	fi
 	if grep -qx "RASPUTIN_NODE_ID=fw-test-1" "$WORK/with-id.env" && grep -qx "#instance-closed" "$WORK/with-id.env"; then
 		ok "$tokcase: the agent starts with RASPUTIN_NODE_ID=fw-test-1"
@@ -492,6 +509,88 @@ if grep -qx "#instance-closed" "$WORK/noid.env" || grep -q '^RASPUTIN_' "$WORK/n
 	bad "the agent started with no node id:"; sed 's/^/      /' "$WORK/noid.env" >&2
 else
 	ok "nats_url set, node_id blank: no procd instance"
+fi
+
+echo "11. the join token: its own 0600 file, never a UCI value or an env value"
+# geekdojo/geekdojo-brain#537 (auth methodology §7 4.1). The token used to be
+# rasputin.main.join_token in a world-readable config file, handed to the agent
+# as RASPUTIN_CP_JOIN_TOKEN in its environment. Now apply-seed writes
+# /etc/rasputin/join.token (0600) and UCI carries only the path, which init.d
+# passes as RASPUTIN_CP_JOIN_TOKEN_FILE for the agent to re-read on every
+# connect. Proved against the image's real uci and its real init script.
+TOKEN=deadbeefdeadbeefdeadbeefdeadbeef
+reset
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply token-file
+[ "$APPLY_RC" -eq 0 ] && ok "apply-seed exits 0" || { bad "apply-seed exit $APPLY_RC"; sed 's/^/      /' "$WORK/token-file.err" >&2; }
+[ "$(cat "$TOKEN_FILE" 2>/dev/null)" = "$TOKEN" ] && ok "the token is in $JOIN_TOKEN_FILE" \
+	|| bad "$JOIN_TOKEN_FILE = '$(cat "$TOKEN_FILE" 2>/dev/null)'"
+[ "$(stat -c %a "$TOKEN_FILE" 2>/dev/null)" = 600 ] && ok "the token file is mode 600" \
+	|| bad "the token file is mode $(stat -c %a "$TOKEN_FILE" 2>/dev/null)"
+ls "$TOKEN_FILE".tmp.* >/dev/null 2>&1 && bad "a temp file was left beside the token file" || ok "no temp file left beside it"
+[ -z "$(uci_get rasputin.main.join_token)" ] && ok "UCI has no join_token option" \
+	|| bad "UCI join_token = '$(uci_get rasputin.main.join_token)'"
+grep -rqF -- "$TOKEN" "$ROOT/etc/config/" && bad "the token is somewhere in /etc/config" || ok "the token is nowhere in /etc/config"
+[ "$(uci_get rasputin.main.join_token_file)" = "$JOIN_TOKEN_FILE" ] && ok "UCI carries the path instead" \
+	|| bad "UCI join_token_file = '$(uci_get rasputin.main.join_token_file)'"
+agent_env > "$WORK/token-file.env" 2>&1
+grep -qx "RASPUTIN_CP_JOIN_TOKEN_FILE=$JOIN_TOKEN_FILE" "$WORK/token-file.env" \
+	&& ok "the agent is given RASPUTIN_CP_JOIN_TOKEN_FILE" \
+	|| { bad "no RASPUTIN_CP_JOIN_TOKEN_FILE in the agent environment:"; sed 's/^/      /' "$WORK/token-file.env" >&2; }
+if grep -q '^RASPUTIN_CP_JOIN_TOKEN=' "$WORK/token-file.env" || grep -qF -- "$TOKEN" "$WORK/token-file.env"; then
+	bad "the token value reached the agent's environment:"; sed 's/^/      /' "$WORK/token-file.env" >&2
+else
+	ok "the token value is not in the agent's environment"
+fi
+grep -qx "#instance-closed" "$WORK/token-file.env" && ok "start_service reached the procd calls (the checks above mean something)" \
+	|| bad "start_service never reached the procd calls"
+grep -qx "RASPUTIN_CP_JOIN_TOKEN=$TOKEN" "$SEED" && ok "seed.env still holds the token (it is the source of record)" \
+	|| bad "seed.env lost the token"
+
+echo "11b. a seed saved on Windows: CR on the token line"
+reset
+{ base_seed | grep -v '^RASPUTIN_CP_JOIN_TOKEN='; printf 'RASPUTIN_CP_JOIN_TOKEN=%s\r\n' "$TOKEN"; } > "$SEED"
+apply token-crlf
+[ "$APPLY_RC" -eq 0 ] && [ "$(cat "$TOKEN_FILE" 2>/dev/null)" = "$TOKEN" ] && ok "trimmed and written" \
+	|| bad "exit $APPLY_RC, token file '$(od -c < "$TOKEN_FILE" 2>/dev/null | head -2)'"
+
+echo "11c. a box seeded before the token file: init.d moves it, once"
+# An A/B slot update carries the overlay across and does not re-run apply-seed,
+# so the agent's own init script has to do the migration. This is the pre-#537
+# UCI config, written by hand exactly as the old apply-seed wrote it.
+reset
+cat > "$UCI" <<EOF
+config rasputin 'main'
+	option node_role 'firewall'
+	option nats_url 'nats://example-cluster.local:4222'
+	option join_token '$TOKEN'
+	option node_id 'fw-test-1'
+	option cluster_id 'example-cluster'
+EOF
+agent_env > "$WORK/migrate.env" 2>&1
+[ "$(cat "$TOKEN_FILE" 2>/dev/null)" = "$TOKEN" ] && ok "the token was moved into $JOIN_TOKEN_FILE" \
+	|| bad "$JOIN_TOKEN_FILE = '$(cat "$TOKEN_FILE" 2>/dev/null)'"
+[ "$(stat -c %a "$TOKEN_FILE" 2>/dev/null)" = 600 ] && ok "mode 600" || bad "mode $(stat -c %a "$TOKEN_FILE" 2>/dev/null)"
+[ -z "$(uci_get rasputin.main.join_token)" ] && ok "the legacy UCI option is gone" \
+	|| bad "UCI join_token = '$(uci_get rasputin.main.join_token)'"
+[ "$(uci_get rasputin.main.join_token_file)" = "$JOIN_TOKEN_FILE" ] && ok "UCI now carries the path" \
+	|| bad "UCI join_token_file = '$(uci_get rasputin.main.join_token_file)'"
+grep -qx "RASPUTIN_CP_JOIN_TOKEN_FILE=$JOIN_TOKEN_FILE" "$WORK/migrate.env" \
+	&& ok "the agent starts on the file in the same pass" \
+	|| { bad "the agent's environment does not name the token file:"; sed 's/^/      /' "$WORK/migrate.env" >&2; }
+grep -q '^RASPUTIN_CP_JOIN_TOKEN=' "$WORK/migrate.env" \
+	&& bad "the inline token was passed too" || ok "the inline token was not passed"
+cp "$UCI" "$WORK/uci-after-migrate"
+agent_env > "$WORK/migrate2.env" 2>&1
+cmp -s "$WORK/uci-after-migrate" "$UCI" && ok "a second start changes nothing (no commit loop)" \
+	|| { bad "a second start rewrote /etc/config/rasputin"; diff "$WORK/uci-after-migrate" "$UCI" | sed 's/^/      /' >&2; }
+
+echo "11d. sysupgrade keeps the token file"
+if in_chroot /sbin/sysupgrade -l > "$WORK/keep-token.txt" 2> "$WORK/keep-token.err"; then
+	grep -qx "$JOIN_TOKEN_FILE" "$WORK/keep-token.txt" && ok "$JOIN_TOKEN_FILE is in the sysupgrade backup" \
+		|| { bad "$JOIN_TOKEN_FILE missing from sysupgrade -l"; sed 's/^/      /' "$WORK/keep-token.txt" >&2; }
+else
+	bad "sysupgrade -l failed in the chroot:"; sed 's/^/      /' "$WORK/keep-token.err" >&2
 fi
 
 echo

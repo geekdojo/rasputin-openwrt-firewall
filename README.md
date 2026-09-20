@@ -170,6 +170,15 @@ URL or join token but no node id makes `apply-seed` stop and apply nothing, with
 the reason in `logread`. The Add-node flow and `rasputin-provision` always
 write it.
 
+`apply-seed` puts the join token in one owner-only file,
+`/etc/rasputin/join.token` (mode 0600, kept across `sysupgrade` with the rest
+of `/etc/rasputin/`), and `/etc/config/rasputin` carries only its path as
+`rasputin.main.join_token_file`. The agent is handed that path and re-reads the
+file on every connect attempt, so a token that is rotated or re-minted is
+picked up on the next reconnect rather than the next restart. A box seeded
+before this has the token as `rasputin.main.join_token`; the agent's init
+script moves it into the file on its next start.
+
 `RASPUTIN_BUS_PIN` makes the agent dial the bus over TLS and accept only the
 controlplane key it names. It is public, the controlplane puts it in every
 seed it makes, and it must be copied exactly (`sha256/` plus 44 characters of

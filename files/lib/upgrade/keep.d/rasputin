@@ -9,6 +9,12 @@
 #                      job or hand-edited; MUST survive sysupgrade or
 #                      every firmware update would reset the firewall
 #                      back to unconfigured state).
+#   - join.token       the bus join token, 0600, written by apply-seed from
+#                      seed.env. The agent is given its PATH and re-reads it on
+#                      every connect (geekdojo/geekdojo-brain#537). It must
+#                      survive sysupgrade for the same reason seed.env does —
+#                      /etc/config/rasputin is regenerated, and it no longer
+#                      holds the token.
 #   - trust/root-ca.pem  CI-injected at build, but if the operator ever
 #                      rotates it locally that change should survive too.
 #   - agent-state/     rasputin-agent state (RASPUTIN_AGENT_STATE_DIR,
