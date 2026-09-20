@@ -24,6 +24,20 @@
 #   - Atomic and idempotent: writes a 0600 temp file beside /etc/shadow and
 #     renames it, so a failure leaves the old file whole; re-applying the same
 #     hash is a no-op-equivalent (same result).
+#   - On success with a real hash (not a lock token) it also turns the CONSOLE
+#     LOGIN PROMPT on: `system.@system[0].ttylogin=1`
+#     (geekdojo/geekdojo-brain#587, Bryce 2026-09-19). Stock OpenWrt leaves
+#     ttylogin unset and /usr/libexec/login.sh then runs
+#     `exec /bin/login -f root` — the serial port and the BMC serial-over-LAN
+#     session hand out a root shell with no prompt. Turning it on is only safe
+#     ONCE a password exists, which is exactly here: the hash is in the file,
+#     so the prompt can be answered. A lock token ('*' / '!') does NOT turn it
+#     on — nothing could answer the prompt and the operator would be locked out
+#     of the one channel that survives a dead network.
+#
+#     It is never set back to 0. rasputin-mgmt-harden re-asserts the same gate
+#     on every boot from the same fact, so a box that took the hash while this
+#     helper was absent (an older image) still gets the prompt at its next boot.
 #
 # EXIT: 0 on success (root's field now equals the hash), non-zero otherwise,
 # having changed nothing.
@@ -95,4 +109,29 @@ mv -f "$tmp" "$SHADOW" || die "could not replace $SHADOW; nothing changed"
 trap - EXIT
 
 logger -t rasputin "set-root-hash: applied a control-plane-delivered root password hash [#558]"
+
+# The console can now ask for a login, because there is finally something to
+# answer with. Only for a real hash — a lock token leaves the console as it
+# was. login.sh re-reads ttylogin on every console session (OpenWrt v25.12.5
+# base-files, from inittab's ::askconsole:), so this takes effect on the next
+# session without a reboot.
+#
+# Best-effort: the password IS applied, and rasputin-mgmt-harden re-asserts
+# this on the next boot from root's shadow field, so a uci failure here must
+# not fail the password delivery the control plane is waiting on.
+case "$HASH" in
+	'*'|'!' ) : ;;
+	* )
+		if command -v uci >/dev/null 2>&1; then
+			if [ "$(uci -q get system.@system[0].ttylogin 2>/dev/null || true)" = 1 ]; then
+				: # already on
+			elif uci -q set system.@system[0].ttylogin='1' && uci -q commit system; then
+				logger -t rasputin "set-root-hash: console login prompt enabled (was: auto-root shell) [#587]"
+			else
+				logger -t rasputin "set-root-hash: WARNING — could not enable the console login prompt; rasputin-mgmt-harden retries on the next boot [#587]"
+			fi
+		fi
+		;;
+esac
+
 exit 0

@@ -80,6 +80,20 @@ uci() {
 							printf '%s=%s\n' "$_k" "$_v" >> "$UCI_STATE"
 						fi
 						;;
+					set\ *)
+						# The batch form harden_console_login uses. Same
+						# literal-key handling as the delete case above, for
+						# the same reason: system.@system[0].ttylogin holds
+						# brackets, which a regex match would read as a
+						# character class and never find.
+						_kv=${_l#set }
+						_k=${_kv%%=*}
+						_v=${_kv#*=}
+						_v=$(printf '%s' "$_v" | sed "s/^'//; s/'\$//")
+						awk -v k="$_k=" 'index($0, k) != 1' "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
+						mv -f "$UCI_STATE.n" "$UCI_STATE"
+						printf '%s=%s\n' "$_k" "$_v" >> "$UCI_STATE"
+						;;
 					commit\ *) : ;;
 				esac
 			done
@@ -226,6 +240,81 @@ harden_dropbear; rc=$?
 : > "$UCI_STATE"
 harden_dropbear; rc=$?
 [ "$rc" = 1 ] && ok || no "dropbear absent: returns unchanged(1)" "1" "$rc"
+
+echo "== console login prompt (ttylogin), gated on root actually having a password"
+
+# The gate, stated once: a login prompt is only an improvement when there is
+# a password to answer it with. Stock OpenWrt auto-logs root in at the console
+# (login.sh: `[ ttylogin = 1 ] || exec /bin/login -f root`), so turning the
+# prompt on with an empty or locked root field would swap "anyone at the serial
+# port is root" for "nobody can use the serial port at all" — including the
+# operator whose network is down. (#587, Bryce 2026-09-19.)
+
+REAL_HASH='$6$abcdefgh$0123456789abcdefABCDEF.hashhashhashhashhashhashhashhash0'
+
+# no password (stock empty field) -> ttylogin untouched
+: > "$UCI_STATE"
+sf="$SCRATCH/shadow.tty.empty"; printf 'root:::0:99999:7:::\n' > "$sf"
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rc" = 1 ] && ok || no "empty root field: returns unchanged(1)" "1" "$rc"
+[ -z "$got" ] && ok || no "empty root field: ttylogin left alone" "(unset)" "$got"
+
+# locked '*' -> still no prompt; nothing could answer it
+: > "$UCI_STATE"
+sf="$SCRATCH/shadow.tty.lock"; printf 'root:*:0:99999:7:::\n' > "$sf"
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rc" = 1 ] && ok || no "locked root field: returns unchanged(1)" "1" "$rc"
+[ -z "$got" ] && ok || no "locked root field: ttylogin left alone" "(unset)" "$got"
+
+# '!' lock, the other spelling
+: > "$UCI_STATE"
+sf="$SCRATCH/shadow.tty.bang"; printf 'root:!:0:99999:7:::\n' > "$sf"
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ -z "$got" ] && ok || no "'!' lock: ttylogin left alone" "(unset)" "$got"
+
+# a delivered hash -> the prompt goes on
+: > "$UCI_STATE"
+sf="$SCRATCH/shadow.tty.real"; printf 'root:%s:0:99999:7:::\n' "$REAL_HASH" > "$sf"
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rc" = 0 ] && ok || no "delivered hash: returns changed(0)" "0" "$rc"
+[ "$got" = 1 ] && ok || no "delivered hash: ttylogin -> 1" "1" "$got"
+
+# idempotent: a second boot changes nothing
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rc" = 1 ] && ok || no "already on: returns unchanged(1)" "1" "$rc"
+[ "$got" = 1 ] && ok || no "already on: still 1" "1" "$got"
+
+# an operator who already set it is not disturbed, password or not
+: > "$UCI_STATE"
+printf 'system.@system[0].ttylogin=1\n' >> "$UCI_STATE"
+sf="$SCRATCH/shadow.tty.opempty"; printf 'root:::0:99999:7:::\n' > "$sf"
+SHADOW="$sf" harden_console_login; rc=$?
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$got" = 1 ] && ok || no "operator's own ttylogin=1: never set back to 0" "1" "$got"
+
+# boot() runs the gate AFTER the shadow floor: a stock box gets the '*' lock
+# and therefore still no prompt, in one pass.
+reset_uci_stock
+sf="$SCRATCH/shadow.tty.boot"; printf '%s\n' "$STOCK" > "$sf"
+SHADOW="$sf" boot
+rf=$(awk -F: '$1=="root"{print $2}' "$sf")
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rf" = '*' ] && ok || no "boot on a stock box: root field -> '*'" "*" "$rf"
+[ -z "$got" ] && ok || no "boot on a stock box: no console prompt (nothing could answer it)" "(unset)" "$got"
+
+# and a box that already took a control-plane hash gets the prompt on that boot
+reset_uci_stock
+sf="$SCRATCH/shadow.tty.boot2"; printf 'root:%s:0:99999:7:::\n' "$REAL_HASH" > "$sf"
+SHADOW="$sf" boot
+rf=$(awk -F: '$1=="root"{print $2}' "$sf")
+got=$(uci -q get system.@system[0].ttylogin || true)
+[ "$rf" = "$REAL_HASH" ] && ok || no "boot with a delivered hash: hash preserved" "$REAL_HASH" "$rf"
+[ "$got" = 1 ] && ok || no "boot with a delivered hash: console prompt on" "1" "$got"
 
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ] || exit 1
