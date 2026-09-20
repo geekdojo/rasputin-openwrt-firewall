@@ -47,8 +47,13 @@ uci() {
 	_cmd=${1:-}; shift 2>/dev/null || true
 	case "$_cmd" in
 		get)
+			# Exact prefix match, not grep: a UCI key holds regex
+			# metacharacters — `dropbear.@dropbear[0]` would match
+			# `dropbear.@dropbear0` as a character class and miss the real
+			# line, which is how a mock quietly reports "no such section" for
+			# every section there is.
 			_key=$1
-			_line=$(grep "^$_key=" "$UCI_STATE" 2>/dev/null | head -1)
+			_line=$(awk -v k="$_key=" 'index($0, k) == 1 { print; exit }' "$UCI_STATE" 2>/dev/null)
 			[ -n "$_line" ] || return 1
 			printf '%s\n' "${_line#*=}"
 			;;
@@ -57,7 +62,7 @@ uci() {
 				case "$_l" in
 					delete\ *)
 						_k=${_l#delete }
-						grep -v "^$_k=" "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
+						awk -v k="$_k=" 'index($0, k) != 1' "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
 						mv -f "$UCI_STATE.n" "$UCI_STATE"
 						;;
 					add_list\ *)
@@ -65,10 +70,10 @@ uci() {
 						_k=${_kv%%=*}
 						_v=${_kv#*=}
 						_v=$(printf '%s' "$_v" | sed "s/^'//; s/'\$//")
-						_cur=$(grep "^$_k=" "$UCI_STATE" 2>/dev/null | head -1)
+						_cur=$(awk -v k="$_k=" 'index($0, k) == 1 { print; exit }' "$UCI_STATE" 2>/dev/null)
 						if [ -n "$_cur" ]; then
 							_old=${_cur#*=}
-							grep -v "^$_k=" "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
+							awk -v k="$_k=" 'index($0, k) != 1' "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
 							mv -f "$UCI_STATE.n" "$UCI_STATE"
 							printf '%s=%s %s\n' "$_k" "$_old" "$_v" >> "$UCI_STATE"
 						else
@@ -79,6 +84,16 @@ uci() {
 				esac
 			done
 			;;
+		set)
+			# `set key=value`, the form harden_dropbear uses.
+			_kv=$1
+			_k=${_kv%%=*}
+			_v=${_kv#*=}
+			awk -v k="$_k=" 'index($0, k) != 1' "$UCI_STATE" > "$UCI_STATE.n" 2>/dev/null || true
+			mv -f "$UCI_STATE.n" "$UCI_STATE"
+			printf '%s=%s\n' "$_k" "$_v" >> "$UCI_STATE"
+			;;
+		commit) : ;;
 		*) : ;;
 	esac
 }
@@ -152,5 +167,65 @@ rf=$(awk -F: '$1=="root"{print $2}' "$sf")
 [ "$rf" = "$real" ] && ok || no "delivered hash: preserved" "$real" "$rf"
 
 echo ""
+
+echo "== dropbear key-only, unconditional"
+
+reset_uci_dropbear() {
+	: > "$UCI_STATE"
+	printf 'dropbear.@dropbear[0]=dropbear\n' >> "$UCI_STATE"
+	# Stock OpenWrt: password auth ON.
+	printf 'dropbear.@dropbear[0].PasswordAuth=on\n' >> "$UCI_STATE"
+	printf 'dropbear.@dropbear[0].RootPasswordAuth=on\n' >> "$UCI_STATE"
+}
+
+# Stock: both options flipped off, reported as changed(0).
+reset_uci_dropbear
+harden_dropbear; rc=$?
+[ "$rc" = 0 ] && ok || no "dropbear stock: returns changed(0)" "0" "$rc"
+[ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" = off ] && ok \
+	|| no "dropbear stock: PasswordAuth off" "off" "$(uci -q get dropbear.@dropbear[0].PasswordAuth)"
+[ "$(uci -q get dropbear.@dropbear[0].RootPasswordAuth)" = off ] && ok \
+	|| no "dropbear stock: RootPasswordAuth off" "off" "$(uci -q get dropbear.@dropbear[0].RootPasswordAuth)"
+
+# Steady state: nothing changes, so an ordinary boot neither writes nor reloads.
+harden_dropbear; rc=$?
+[ "$rc" = 1 ] && ok || no "dropbear steady state: returns unchanged(1)" "1" "$rc"
+
+# THE case the old condition skipped: no authorized key anywhere. Password auth
+# must still be turned off — with no key there is simply no network shell,
+# which is the intended state; with password auth on it is a root login prompt.
+reset_uci_dropbear
+rm -f "$SCRATCH/authorized_keys"
+harden_dropbear; rc=$?
+[ "$rc" = 0 ] && ok || no "dropbear with no key: still hardens" "0" "$rc"
+[ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" = off ] && ok \
+	|| no "dropbear with no key: PasswordAuth off" "off" "$(uci -q get dropbear.@dropbear[0].PasswordAuth)"
+
+# Only one of the two flipped back (an operator, a package): the other is left
+# alone and the section still ends up fully hardened.
+reset_uci_dropbear
+uci -q set dropbear.@dropbear[0].RootPasswordAuth=off
+harden_dropbear; rc=$?
+[ "$rc" = 0 ] && ok || no "dropbear half-flipped: returns changed(0)" "0" "$rc"
+[ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" = off ] && ok \
+	|| no "dropbear half-flipped: PasswordAuth off" "off" "$(uci -q get dropbear.@dropbear[0].PasswordAuth)"
+
+# A second dropbear section — dropbear listens on every one, so every one is
+# hardened, not just the first.
+reset_uci_dropbear
+printf 'dropbear.@dropbear[1]=dropbear\n' >> "$UCI_STATE"
+printf 'dropbear.@dropbear[1].PasswordAuth=on\n' >> "$UCI_STATE"
+printf 'dropbear.@dropbear[1].RootPasswordAuth=on\n' >> "$UCI_STATE"
+harden_dropbear; rc=$?
+[ "$rc" = 0 ] && ok || no "dropbear two sections: returns changed(0)" "0" "$rc"
+[ "$(uci -q get dropbear.@dropbear[1].PasswordAuth)" = off ] && ok \
+	|| no "dropbear two sections: the second is hardened too" "off" "$(uci -q get dropbear.@dropbear[1].PasswordAuth)"
+
+# No dropbear section at all: nothing listens, nothing to harden, and it says
+# so rather than reporting a change nobody made.
+: > "$UCI_STATE"
+harden_dropbear; rc=$?
+[ "$rc" = 1 ] && ok || no "dropbear absent: returns unchanged(1)" "1" "$rc"
+
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ] || exit 1

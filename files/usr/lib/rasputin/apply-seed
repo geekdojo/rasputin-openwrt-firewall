@@ -125,24 +125,22 @@ if [ -n "${RASPUTIN_SSH_AUTHORIZED_KEY:-}" ]; then
 	fi
 fi
 
-# Re-assert key-only SSH whenever an authorized key exists.
-# 96-rasputin-dropbear-harden already disables password auth unconditionally
-# at first boot (and self-deletes); this block is defense-in-depth for the
-# life of the install — key-only is the product posture, so any later
-# apply-seed run (operator re-run, bootstrap_firewall push) puts it back
-# even if someone flipped it. dropbear reads PasswordAuth from UCI at start;
-# reload picks it up on a running box and is a harmless no-op pre-procd on
-# first boot.
-if [ -s /etc/dropbear/authorized_keys ]; then
-	if [ "$(uci -q get dropbear.@dropbear[0].PasswordAuth)" != "off" ]; then
-		uci -q batch <<'EOF'
-set dropbear.@dropbear[0].PasswordAuth='off'
-set dropbear.@dropbear[0].RootPasswordAuth='off'
-commit dropbear
-EOF
-		/etc/init.d/dropbear reload 2>/dev/null || true
-		logger -t rasputin "apply-seed: dropbear hardened to key-only SSH (authorized key present)"
-	fi
+# Key-only SSH is re-asserted by ONE thing on this image:
+# /etc/init.d/rasputin-mgmt-harden, on every boot, unconditionally
+# (geekdojo/geekdojo-brain#545). This block used to carry its own copy of the
+# UCI writes, gated on /etc/dropbear/authorized_keys being non-empty — so the
+# case it skipped was a box with no key at all, which is exactly the box where
+# password auth left on is a root login prompt on the LAN.
+#
+# Applying a seed to a RUNNING box is a moment worth re-asserting the
+# management floor at, so this calls that script rather than repeating it. Its
+# steps are idempotent and each tolerates a service that has not started yet,
+# which is the first-boot case (this runs from uci-defaults before procd brings
+# services up). Never fails the seed apply: the floor is also re-applied on the
+# next boot.
+if [ -x /etc/init.d/rasputin-mgmt-harden ]; then
+	/etc/init.d/rasputin-mgmt-harden start >/dev/null 2>&1 \
+		|| logger -t rasputin "apply-seed: WARNING — could not re-assert the management floor (it runs again on the next boot)"
 fi
 
 # --- bus pin ---------------------------------------------------------------
