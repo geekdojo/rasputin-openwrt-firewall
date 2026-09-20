@@ -1,0 +1,124 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-mgmt-harden — re-assert the firewall's management-plane floor on
+# EVERY boot: LuCI/uhttpd off the LAN (loopback only), and a non-empty,
+# unusable root password field. Idempotent; safe to run repeatedly.
+#
+# WHY AN INIT SCRIPT, NOT uci-defaults
+#   uci-defaults run only on a fresh overlay and then self-delete, so a box
+#   carried across an A/B slot update (which preserves the extroot /overlay,
+#   /etc/config/uhttpd and /etc/shadow included) would never pick these up —
+#   the fielded fleet would stay on the stock 0.0.0.0 LuCI listener and the
+#   stock empty root password. An init script baked into the rootfs reaches
+#   OTA-upgraded boxes too, because ImageBuilder stamps its rc.d symlink into
+#   the squashfs (/rom) — the exact mechanism rasputin-ipv4-only (#132) was
+#   validated over OTA on. So this carries no `enable` line in 99-rasputin;
+#   the image's baked activation is what makes it run everywhere.
+#
+# WHAT IT ENFORCES
+#   1. uhttpd (LuCI + the /ubus JSON-RPC endpoint) listens on loopback only.
+#      Reached by the operator through `ssh -L` (geekdojo/geekdojo-brain#559).
+#      Stock OpenWrt binds uhttpd to 0.0.0.0:80 and 0.0.0.0:443, which puts
+#      LuCI AND rpcd's ubus endpoint on the LAN.
+#   2. root's /etc/shadow password field is non-empty and unusable when it is
+#      otherwise empty. Stock OpenWrt ships `root:::` (empty), which lets
+#      rpcd grant a full-ACL root session for an empty password over /ubus,
+#      and which trips OpenWrt's blank-root-password dropbear patch. A
+#      non-empty unusable value closes both. Key-only SSH is unaffected:
+#      dropbear's public-key path never reads the password hash (verified on
+#      the shipped OpenWrt 25.12.5 dropbear, geekdojo/geekdojo-brain#468).
+#
+#      It only fills an EMPTY field. A real hash delivered by the control
+#      plane (/usr/lib/rasputin/set-root-hash, geekdojo/geekdojo-brain#558)
+#      is left untouched, as is an already-locked field.
+#
+# START=49: before uhttpd (START=50), so on every boot — first flash or an
+# OTA-upgraded slot — uhttpd comes up already bound to loopback, with no LAN
+# window. The root-hash step has no ordering constraint; it rides along here.
+#
+# NOTE ON SCOPE: this closes the NETWORK/rpcd vector (F16) and makes root's
+# credential unusable. The physical console still hands out a root shell
+# without a prompt while `system.@system[0].ttylogin` is 0 (OpenWrt's default,
+# askfirst -> shell). Closing that (F15) is a console-model decision
+# (geekdojo/geekdojo-brain dec 6) and is deliberately NOT taken here.
+
+START=49
+
+# /etc/shadow in production. RASPUTIN_SHADOW_FILE lets the behaviour tests point
+# it at a scratch file; it is never set on the box.
+SHADOW="${RASPUTIN_SHADOW_FILE:-/etc/shadow}"
+# A non-empty field that no password can ever hash to. crypt() with a salt of
+# "*" never yields "*", so rpcd's `$p$root` check and busybox login both refuse
+# every password; dropbear key auth ignores it. This is the "no password set"
+# floor until the control plane delivers a real hash.
+LOCK='*'
+
+harden_uhttpd() {
+	# Only rewrite when it is not already loopback-only, so a steady-state boot
+	# is a no-op (no needless commit / reload).
+	http="$(uci -q get uhttpd.main.listen_http 2>/dev/null || true)"
+	https="$(uci -q get uhttpd.main.listen_https 2>/dev/null || true)"
+	want_http='127.0.0.1:80 [::1]:80'
+	want_https='127.0.0.1:443 [::1]:443'
+
+	if [ "$http" = "$want_http" ] && [ "$https" = "$want_https" ]; then
+		return 1   # already loopback-only; nothing changed
+	fi
+
+	uci -q batch <<-EOF
+		delete uhttpd.main.listen_http
+		delete uhttpd.main.listen_https
+		add_list uhttpd.main.listen_http='127.0.0.1:80'
+		add_list uhttpd.main.listen_http='[::1]:80'
+		add_list uhttpd.main.listen_https='127.0.0.1:443'
+		add_list uhttpd.main.listen_https='[::1]:443'
+		commit uhttpd
+	EOF
+	logger -t rasputin "mgmt-harden: uhttpd bound to loopback only (LuCI + /ubus off the LAN; reach it via ssh -L) [#559]"
+	return 0
+}
+
+harden_root_shadow() {
+	[ -f "$SHADOW" ] || return 1
+
+	# Second field of the root line is the password hash. Empty => stock
+	# OpenWrt default; fill it with the unusable lock. Anything non-empty
+	# (a real delivered hash, or an existing lock) is left alone.
+	cur="$(awk -F: '$1=="root"{print $2; exit}' "$SHADOW")"
+	if [ -n "$cur" ]; then
+		return 1   # already set (locked or a delivered hash); leave it
+	fi
+
+	tmp="$SHADOW.rasputin.$$"
+	# Verify with awk field equality, not grep: LOCK is '*', a regex metachar.
+	if awk -v lock="$LOCK" -F: 'BEGIN{OFS=":"} $1=="root"{$2=lock} {print}' \
+		"$SHADOW" > "$tmp" 2>/dev/null \
+		&& chmod 600 "$tmp" 2>/dev/null \
+		&& [ "$(awk -F: -v l="$LOCK" '$1=="root"{print ($2==l)?"y":"n"; exit}' "$tmp")" = y ] \
+		&& mv -f "$tmp" "$SHADOW" 2>/dev/null
+	then
+		logger -t rasputin "mgmt-harden: root password field was empty; set to a non-empty unusable lock (key-only SSH unaffected) [#503]"
+		return 0
+	fi
+	rm -f "$tmp" 2>/dev/null || true
+	logger -t rasputin "mgmt-harden: WARNING — could not set the root lock in $SHADOW"
+	return 1
+}
+
+boot() {
+	# On the boot path uhttpd has not started yet (START 49 < 50), so no reload
+	# is needed — it will read the loopback config when it starts.
+	harden_uhttpd || true
+	harden_root_shadow || true
+}
+
+# A manual `start` (operator or a bench run) does the same, and reloads uhttpd
+# so a running box picks up the loopback binding without a reboot.
+start() {
+	changed=0
+	harden_uhttpd && changed=1
+	harden_root_shadow || true
+	if [ "$changed" = 1 ] && [ -x /etc/init.d/uhttpd ]; then
+		/etc/init.d/uhttpd reload 2>/dev/null || /etc/init.d/uhttpd restart 2>/dev/null || true
+	fi
+}

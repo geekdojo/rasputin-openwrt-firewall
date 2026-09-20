@@ -76,9 +76,11 @@ image/grub.cfg
 image/genimage.cfg
 files/etc/init.d/rasputin-agent
 files/etc/init.d/rasputin-ipv4-only
+files/etc/init.d/rasputin-mgmt-harden
 files/etc/uci-defaults/99-rasputin
 files/etc/uci-defaults/98-rasputin-seed
 files/usr/lib/rasputin/apply-seed
+files/usr/lib/rasputin/set-root-hash
 files/usr/lib/rasputin/node-id.sh
 files/usr/lib/rasputin/bus-pin.sh
 files/usr/lib/rasputin/seed-fat-device

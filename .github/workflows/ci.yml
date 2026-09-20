@@ -19,7 +19,8 @@
 ##   living in two workflows and drifting out of sync (the agent-version.txt pin), and a
 ##   check that disagrees with itself is worse than no check.
 ##   Plus the behavioural tests release.yml's validate job also runs:
-##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-seed-scrub.sh,
+##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-set-root-hash.sh,
+##   scripts/test-mgmt-harden.sh, scripts/test-seed-scrub.sh,
 ##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh and
 ##   scripts/test-release-target-guard.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
@@ -82,6 +83,26 @@ jobs:
         env:
           REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-bus-pin.sh
+
+      # set-root-hash installs a control-plane-delivered root password hash into
+      # /etc/shadow (geekdojo/geekdojo-brain#558). It must accept a real crypt
+      # hash and rewrite only root's field, and fail closed on a plaintext or a
+      # shadow-corrupting value while never echoing the candidate — none of
+      # which a syntax check sees. Table-tested under dash, bash and busybox ash.
+      - name: set-root-hash helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-set-root-hash.sh
+
+      # rasputin-mgmt-harden re-asserts, every boot, the two management-plane
+      # floors: uhttpd bound to loopback (geekdojo/geekdojo-brain#559) and a
+      # non-empty unusable root field (geekdojo/geekdojo-brain#503). Both must be
+      # idempotent — a steady-state boot changes nothing and never clobbers a
+      # delivered root hash. Driven against a mock uci and a scratch shadow.
+      - name: mgmt-harden helper tests
+        timeout-minutes: 5
+        run: sh scripts/test-mgmt-harden.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
       # provisioning, where uci-defaults self-delete and there is no second
