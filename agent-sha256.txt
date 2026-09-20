@@ -1,0 +1,30 @@
+# sha256 of the rasputin-agent tarball agent-version.txt pins.
+#
+# SINGLE SOURCE OF TRUTH — scripts/fetch-agent.sh reads it, and both
+# .github/workflows/release.yml and canary.yml call that script, so the pin can
+# never differ between a real build and the canary that is supposed to mirror
+# one.
+#
+# WHY THIS EXISTS SEPARATELY FROM THE PUBLISHED .sha256. The control-plane
+# release publishes a .sha256 beside every tarball, and the fetch checks
+# against it too. But that file proves only that the tarball matches what the
+# release page says TODAY: both are assets of the same release, and anything
+# that can replace one can replace the other. This pin proves it is still the
+# tarball this repository was built and tested against. A build gets the agent
+# only when BOTH agree.
+#
+# The binary this names is baked into the firewall image, runs as root on the
+# node that terminates the WAN, and holds the bus join credential. It is the
+# one file in this build that is not produced by OpenWrt's ImageBuilder and not
+# covered by a package feed signature.
+#
+# TO BUMP: change agent-version.txt and this file in the same commit. The
+# version must already be published on geekdojo/rasputin-control-plane. On a
+# mismatch the fetch prints the sha it actually got, so the new value is a
+# copy-paste — but read WHY it changed before pasting it.
+#
+# Format: lines starting with `#` and blank lines are ignored; the first
+# remaining line is the bare lowercase hex sha256 (no "sha256:" prefix).
+#
+# 2026.09.4-dev.171  rasputin-agent-2026.09.4-dev.171-linux-amd64.tar.gz
+f30deeb9833d233d12852532e1439101ab0bf045c54bd08f3fe7026b51061f42

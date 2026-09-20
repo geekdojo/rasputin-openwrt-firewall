@@ -90,20 +90,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Pinned agent version — read from ./agent-version.txt, the SAME
-          # single source release.yml uses, so this build mirrors a real
-          # release and the pin can't drift. Bump in agent-version.txt only.
-          VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
-          [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
-          echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
-          mkdir -p /tmp/agent files/usr/bin
-          gh release download "v$VER" \
-            --repo geekdojo/rasputin-control-plane \
-            --pattern "rasputin-agent-${VER}-linux-amd64.tar.gz" \
-            --dir /tmp/agent --clobber
-          tar -xzf /tmp/agent/rasputin-agent-${VER}-linux-amd64.tar.gz \
-            -C files/usr/bin
-          chmod +x files/usr/bin/rasputin-agent
+          # Pinned version AND pinned sha256, both single sources shared with
+          # the other workflow through scripts/fetch-agent.sh, so a canary
+          # build and a real release cannot install different agents. The
+          # script refuses a tarball that does not match agent-sha256.txt, and
+          # cross-checks the release's own published .sha256 as well.
+          ./scripts/fetch-agent.sh files/usr/bin
 
       - name: Inject trust root from org variable
         run: |
