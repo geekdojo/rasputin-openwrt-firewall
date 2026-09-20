@@ -709,6 +709,16 @@ jobs:
 
       - name: CMS-sign images + emit manifest.json
         id: sign
+        env:
+          # Through the environment, not expanded into the script text: a
+          # `${{ }}` inside a run block is substituted before the shell ever
+          # sees it, so its value becomes code rather than data. These
+          # particular values are paths the signing action just wrote, but the
+          # rule is the rule (zizmor template-injection), and a step that
+          # follows it is one nobody has to re-reason about later.
+          LEAF: ${{ steps.mat.outputs.leaf }}
+          INTERMEDIATE: ${{ steps.mat.outputs.intermediate }}
+          KEY: ${{ steps.mat.outputs.key }}
         run: |
           set -eu
           mkdir -p release-out
@@ -728,9 +738,9 @@ jobs:
             f="$1"
             openssl cms -sign -binary \
               -in "release-out/$f" \
-              -signer   ${{ steps.mat.outputs.leaf }} \
-              -certfile ${{ steps.mat.outputs.intermediate }} \
-              -inkey    ${{ steps.mat.outputs.key }} \
+              -signer   "$LEAF" \
+              -certfile "$INTERMEDIATE" \
+              -inkey    "$KEY" \
               -outform DER \
               -out "release-out/${f}.sig"
           }
