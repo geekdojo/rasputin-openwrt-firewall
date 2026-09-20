@@ -20,7 +20,24 @@
 #      Reached by the operator through `ssh -L` (geekdojo/geekdojo-brain#559).
 #      Stock OpenWrt binds uhttpd to 0.0.0.0:80 and 0.0.0.0:443, which puts
 #      LuCI AND rpcd's ubus endpoint on the LAN.
-#   2. root's /etc/shadow password field is non-empty and unusable when it is
+#   2. dropbear accepts PUBLIC KEYS ONLY — password auth off, root password
+#      auth off — re-asserted UNCONDITIONALLY, every boot
+#      (geekdojo/geekdojo-brain#545). There were two places that set this and
+#      neither reached a fielded box reliably: 96-rasputin-dropbear-harden is
+#      a uci-defaults script, which runs once on a fresh overlay and then
+#      self-deletes, and apply-seed re-asserts it only when
+#      /etc/dropbear/authorized_keys is non-empty — so a box whose key file
+#      was emptied, or that came across an A/B slot update carrying a UCI
+#      someone had flipped, kept password SSH on the LAN with nothing putting
+#      it back. The rasputin-os side has never had the gap: dropbear runs
+#      there with `-s` in its unit, so key-only is a property of every start.
+#      This is the firewall's equivalent — no condition, every boot.
+#
+#      Unconditional matters most in the case the condition excluded. With no
+#      authorized key there is simply no network shell, which is the intended
+#      state for a box nobody has seeded a key onto; with password auth left
+#      on, it is a root login prompt on the LAN instead.
+#   3. root's /etc/shadow password field is non-empty and unusable when it is
 #      otherwise empty. Stock OpenWrt ships `root:::` (empty), which lets
 #      rpcd grant a full-ACL root session for an empty password over /ubus,
 #      and which trips OpenWrt's blank-root-password dropbear patch. A
@@ -32,9 +49,11 @@
 #      plane (/usr/lib/rasputin/set-root-hash, geekdojo/geekdojo-brain#558)
 #      is left untouched, as is an already-locked field.
 #
-# START=49: before uhttpd (START=50), so on every boot — first flash or an
-# OTA-upgraded slot — uhttpd comes up already bound to loopback, with no LAN
-# window. The root-hash step has no ordering constraint; it rides along here.
+# START=49: before uhttpd (START=50) and before dropbear (START=19 — already
+# started, which is why the dropbear step reloads), so on every boot — first
+# flash or an OTA-upgraded slot — uhttpd comes up already bound to loopback,
+# with no LAN window. The root-hash step has no ordering constraint; it rides
+# along here.
 #
 # NOTE ON SCOPE: this closes the NETWORK/rpcd vector (F16) and makes root's
 # credential unusable. The physical console still hands out a root shell
@@ -78,6 +97,36 @@ harden_uhttpd() {
 	return 0
 }
 
+# harden_dropbear — key-only SSH, on every dropbear section, unconditionally.
+#
+# Every section: a UCI that has grown a second `config dropbear` (an operator
+# opening a port, a package) would otherwise keep password auth on that one,
+# and dropbear listens on all of them.
+#
+# Returns 0 when something changed (the caller reloads), 1 when the steady
+# state was already correct — so an ordinary boot is silent and writes nothing.
+harden_dropbear() {
+	changed=1
+	i=0
+	while uci -q get "dropbear.@dropbear[$i]" >/dev/null 2>&1; do
+		for opt in PasswordAuth RootPasswordAuth; do
+			if [ "$(uci -q get "dropbear.@dropbear[$i].$opt")" != "off" ]; then
+				uci -q set "dropbear.@dropbear[$i].$opt=off"
+				changed=0
+			fi
+		done
+		i=$((i + 1))
+	done
+	# No dropbear section at all: nothing listens, and there is nothing to
+	# harden. Say so rather than report a change.
+	[ "$i" -gt 0 ] || return 1
+	if [ "$changed" = 0 ]; then
+		uci -q commit dropbear
+		logger -t rasputin "mgmt-harden: dropbear re-asserted to key-only SSH (password auth off on $i section(s)) [#545]"
+	fi
+	return "$changed"
+}
+
 harden_root_shadow() {
 	[ -f "$SHADOW" ] || return 1
 
@@ -107,8 +156,15 @@ harden_root_shadow() {
 
 boot() {
 	# On the boot path uhttpd has not started yet (START 49 < 50), so no reload
-	# is needed — it will read the loopback config when it starts.
+	# is needed — it will read the loopback config when it starts. dropbear
+	# (START=19) HAS started, so a change there is reloaded; dropbear reads
+	# PasswordAuth from UCI at start, and a reload is what makes the new value
+	# take effect on the session-accepting process rather than at the next
+	# reboot.
 	harden_uhttpd || true
+	if harden_dropbear && [ -x /etc/init.d/dropbear ]; then
+		/etc/init.d/dropbear reload 2>/dev/null || /etc/init.d/dropbear restart 2>/dev/null || true
+	fi
 	harden_root_shadow || true
 }
 
@@ -117,6 +173,9 @@ boot() {
 start() {
 	changed=0
 	harden_uhttpd && changed=1
+	if harden_dropbear && [ -x /etc/init.d/dropbear ]; then
+		/etc/init.d/dropbear reload 2>/dev/null || /etc/init.d/dropbear restart 2>/dev/null || true
+	fi
 	harden_root_shadow || true
 	if [ "$changed" = 1 ] && [ -x /etc/init.d/uhttpd ]; then
 		/etc/init.d/uhttpd reload 2>/dev/null || /etc/init.d/uhttpd restart 2>/dev/null || true

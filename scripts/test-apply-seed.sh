@@ -525,6 +525,42 @@ for seedcase in nofile blank sshonly; do
 done
 rm -f "$ROOT/etc/dropbear/authorized_keys"
 
+echo "9b. key-only SSH is re-asserted with NO authorized key on the box"
+# THE case the old gate skipped (geekdojo/geekdojo-brain#545). apply-seed used
+# to re-assert key-only SSH only when /etc/dropbear/authorized_keys was
+# non-empty, so a box with no key kept whatever PasswordAuth said — and a box
+# with no key is exactly the one where password auth left on is a root login
+# prompt on the LAN rather than "no network shell". apply-seed now delegates to
+# the one implementation, /etc/init.d/rasputin-mgmt-harden, and this runs it on
+# the real image's busybox and the real uci.
+reset; rm -f "$ROOT/etc/dropbear/authorized_keys"
+# Stock OpenWrt: password auth ON, on a real /etc/config/dropbear.
+in_chroot /bin/sh -c 'uci -q set dropbear.@dropbear[0].PasswordAuth=on; \
+	uci -q set dropbear.@dropbear[0].RootPasswordAuth=on; uci -q commit dropbear' || true
+before_pw="$(uci_get 'dropbear.@dropbear[0].PasswordAuth')"
+[ "$before_pw" = on ] && ok "the box starts with password auth on" \
+	|| bad "could not set up the stock dropbear config (got '$before_pw')"
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply dropbear-nokey
+[ "$APPLY_RC" -eq 0 ] && ok "apply-seed exits 0 with no authorized key" \
+	|| { bad "apply-seed exit $APPLY_RC"; sed 's/^/      /' "$WORK/dropbear-nokey.err" >&2; }
+[ ! -s "$ROOT/etc/dropbear/authorized_keys" ] && ok "there is still no authorized key" \
+	|| bad "an authorized key appeared from nowhere"
+[ "$(uci_get 'dropbear.@dropbear[0].PasswordAuth')" = off ] \
+	&& ok "PasswordAuth is off although no key exists" \
+	|| bad "PasswordAuth is '$(uci_get 'dropbear.@dropbear[0].PasswordAuth')', want off"
+[ "$(uci_get 'dropbear.@dropbear[0].RootPasswordAuth')" = off ] \
+	&& ok "RootPasswordAuth is off although no key exists" \
+	|| bad "RootPasswordAuth is '$(uci_get 'dropbear.@dropbear[0].RootPasswordAuth')', want off"
+
+# The uci-defaults script takes the same path, so a FRESH overlay is hardened
+# before any service starts — and by the same implementation.
+in_chroot /bin/sh -c 'uci -q set dropbear.@dropbear[0].PasswordAuth=on; uci -q commit dropbear' || true
+in_chroot /bin/sh /etc/uci-defaults/96-rasputin-dropbear-harden >/dev/null 2>&1 || true
+[ "$(uci_get 'dropbear.@dropbear[0].PasswordAuth')" = off ] \
+	&& ok "the first-boot uci-defaults script hardens through the same path" \
+	|| bad "96-rasputin-dropbear-harden left PasswordAuth '$(uci_get 'dropbear.@dropbear[0].PasswordAuth')'"
+
 echo "10. the agent never starts without a node id"
 # apply-seed never writes such a config; this is a UCI file edited by hand, or
 # one written before that check. The agent must not run under its default id.

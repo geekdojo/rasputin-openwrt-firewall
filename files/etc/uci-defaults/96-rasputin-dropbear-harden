@@ -1,32 +1,46 @@
 #!/bin/sh
 #
-# 96-rasputin-dropbear-harden — first-boot SSH hardening for the firewall.
+# 96-rasputin-dropbear-harden — apply the management floor on a FRESH overlay,
+# before any service starts.
 #
-# Runs before 99-rasputin (uci-defaults execute in sorted order, then self-
-# delete). Stock OpenWrt ships root with an EMPTY password and dropbear
-# accepting password auth on the LAN — unacceptable for the security node.
+# WHAT IT DOES NOW. It delegates to /etc/init.d/rasputin-mgmt-harden, which is
+# the one implementation of the floor: key-only SSH, uhttpd on loopback, and a
+# non-empty unusable root password field. It used to carry its own copy of the
+# dropbear UCI writes, and apply-seed carried a third — three places setting
+# one thing, which is how the gate that mattered ended up on only one of them
+# (apply-seed re-asserted key-only SSH ONLY when an authorized key existed, so
+# the box it skipped was the one with no key, where password auth left on is a
+# root login prompt on the LAN). geekdojo/geekdojo-brain#545.
 #
-# UNCONDITIONAL since the pre-GA vendor-key removal (2026-07-09): images bake
-# no authorized key (the old build-time inject is gone), so the previous
-# "harden only when a key was baked" gate would have left every public image
-# with passwordless root on the LAN. Now the network vector is key-only from
-# the very first boot, period — matching the rasputin-os posture (`dropbear
-# -s`). The operator's key arrives via RASPUTIN_SSH_AUTHORIZED_KEY in
-# seed.env (apply-seed, which also re-asserts this hardening on every run);
-# with no key there is simply no network shell — LuCI and the local console
+# WHY THIS FILE STILL EXISTS. uci-defaults run from /etc/init.d/boot (START=10)
+# — before dropbear (START=19) and uhttpd (START=50). The init script runs at
+# START=49, so on a FIRST boot dropbear would already have started, read the
+# stock UCI and accepted passwords for the seconds until the reload. There is
+# no window at all when the floor is committed before any service starts, and
+# that is this file's whole job. On every later boot it is gone (uci-defaults
+# self-delete) and the init script is what re-asserts the floor, which is what
+# reaches an OTA-upgraded box.
+#
+# Stock OpenWrt ships root with an EMPTY password and dropbear accepting
+# password auth on the LAN — unacceptable for the security node. The operator's
+# key arrives via RASPUTIN_SSH_AUTHORIZED_KEY in seed.env; with no key there is
+# simply no network shell — LuCI (loopback, via ssh -L) and the local console
 # remain, and seed.env can be edited by mounting the disk. No lockout, no
 # passwordless window.
-#
-# Scope: this hardens the NETWORK vector (dropbear). Console/serial root stays
-# as-is (physical access); a console password is a separate follow-up.
 
 set -eu
 
-uci -q batch <<'EOF'
-set dropbear.@dropbear[0].PasswordAuth='off'
-set dropbear.@dropbear[0].RootPasswordAuth='off'
-commit dropbear
-EOF
+HARDEN=/etc/init.d/rasputin-mgmt-harden
+
+if [ ! -x "$HARDEN" ]; then
+	# Baked into the rootfs, so missing means a broken image rather than a
+	# state to work around. Say so loudly; the box still boots.
+	logger -t rasputin "96-rasputin-dropbear-harden: ERROR: $HARDEN is missing — the management floor was NOT applied"
+	printf '96-rasputin-dropbear-harden: ERROR: %s is missing\n' "$HARDEN" >&2
+	exit 0
+fi
+
+"$HARDEN" start
 logger -t rasputin "dropbear hardened: key-only SSH (password auth disabled; supply a key via seed.env RASPUTIN_SSH_AUTHORIZED_KEY)"
 
 exit 0
