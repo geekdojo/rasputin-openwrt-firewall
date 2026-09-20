@@ -69,6 +69,7 @@
 /etc/rasputin/join.token
 /etc/rasputin/agent-state/
 /etc/rasputin/hosts/
+/etc/rasputin/deployment-mode
 
 # Snort3 (IDS):
 #   - /etc/config/snort        operator UCI tuning (changing home_net,
