@@ -1,12 +1,20 @@
 #
 # Tailscale (mesh overlay) UCI config for the Rasputin firewall (Node N).
 #
-# The OpenWrt tailscale package's init script (/etc/init.d/tailscale,
-# shipped by the package — do NOT override it, it is replaced on upgrade)
-# reads exactly these options from this file via `config_load tailscale`:
+# Rasputin runs tailscaled under its OWN procd service,
+# files/etc/init.d/rasputin-tailscale, which reads exactly these options from
+# this file via `config_load tailscale`:
 #   log_stdout, log_stderr, port, state_file, fw_mode
-# (verified against openwrt/packages net/tailscale tailscale.init on the
-# 24.10, 25.12 and master branches — all identical, 2026-06-17).
+# It reads them with the same names and the same defaults as the stock
+# /etc/init.d/tailscale (verified against openwrt/packages net/tailscale
+# tailscale.init on the 24.10, 25.12 and master branches — all identical,
+# 2026-06-17, and against the shipped 25.12.5 init on the bench 2026-09-19),
+# so this file stays the one place the values live.
+#
+# The stock init is still shipped by the package and is still not overridden —
+# rasputin-tailscale disables it on every start instead, because the stock init
+# forwards no arbitrary env to the daemon and SSL_CERT_FILE is what the Mesh CA
+# trust now rides on (see the NOTE below).
 #
 # We ship this file for two reasons:
 #
@@ -26,10 +34,12 @@
 #    the dependency and guards against a default flip.
 #
 # NOTE on Mesh CA trust: the per-installation Mesh CA that lets tailscaled
-# trust the self-hosted headscale's TLS is installed by rasputin-agent on
-# enrollment — it appends the CA to /etc/ssl/certs/ca-certificates.crt (the
-# stock init can't inject env into the daemon, so SSL_CERT_FILE isn't used on
-# this image). See files/etc/uci-defaults/99-rasputin.
+# trust the self-hosted headscale's TLS is written by rasputin-agent on
+# enrollment to /etc/rasputin/mesh/tailscaled-ca.pem, and tailscaled is pointed
+# at it with SSL_CERT_FILE by files/etc/init.d/rasputin-tailscale. It is NOT
+# appended to the box's global CA bundle any more: that made the Mesh CA an
+# anchor for every TLS client on the box, for every name
+# (geekdojo/geekdojo-brain#542).
 #
 config settings 'settings'
 	option log_stdout '1'

@@ -20,7 +20,8 @@
 ##   check that disagrees with itself is worse than no check.
 ##   Plus the behavioural tests release.yml's validate job also runs:
 ##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-set-root-hash.sh,
-##   scripts/test-mgmt-harden.sh, scripts/test-seed-scrub.sh,
+##   scripts/test-mgmt-harden.sh, scripts/test-tailscale-init.sh,
+##   scripts/test-dhcp-auto.sh, scripts/test-seed-scrub.sh,
 ##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh,
 ##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh and
 ##   scripts/test-agent-pin.sh.
@@ -124,6 +125,24 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
+      # rasputin-tailscale gives tailscaled SSL_CERT_FILE and, on the way,
+      # rewrites the box's global CA bundle to drop the Mesh CA an older agent
+      # appended (geekdojo/geekdojo-brain#542). That bundle is what every TLS
+      # client on the box trusts, so the tests pin both halves: the strip is
+      # idempotent and content-exact, and a bundle whose certificate count does
+      # not add up is left alone rather than rewritten.
+      - name: tailscale init tests
+        timeout-minutes: 5
+        run: sh scripts/test-tailscale-init.sh
+
+      # rasputin-dhcp-auto decides whether the box serves LAN DHCP. A recorded
+      # deployment mode must decide it, with the unauthenticated boot-time
+      # probe reserved for the first boot, before any mode exists
+      # (geekdojo/geekdojo-brain#543). Driven against a mock uci with the
+      # probe and the dnsmasq reload stubbed.
+      - name: dhcp-auto tests
+        timeout-minutes: 5
+        run: sh scripts/test-dhcp-auto.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
       # provisioning, where uci-defaults self-delete and there is no second

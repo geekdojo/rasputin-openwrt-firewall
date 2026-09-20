@@ -96,6 +96,10 @@ image/genimage.cfg, image/grub.cfg    A/B disk layout + boot-counter GRUB config
 files/                                overlay applied to every image:
 ├── etc/rasputin/                     seed template, trust anchors
 ├── etc/init.d/rasputin-agent         procd service
+├── etc/init.d/rasputin-tailscale     procd service for tailscaled, with
+│                                     SSL_CERT_FILE pointed at the Mesh CA
+├── etc/init.d/rasputin-dhcp-auto     LAN DHCP role: the recorded deployment
+│                                     mode, else a first-boot probe
 ├── etc/uci-defaults/                 one-shot first-boot seed (WAN/LAN ports,
 │                                     flow offload, agent enablement)
 └── usr/lib/rasputin/apply-seed       seed.env → UCI sync, re-runnable

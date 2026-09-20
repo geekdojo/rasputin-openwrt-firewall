@@ -73,12 +73,16 @@ scripts/release-target-guard.sh
 scripts/assemble-ab-image.sh
 scripts/agent-pin.sh
 scripts/validate-files.sh
+scripts/test-tailscale-init.sh
+scripts/test-dhcp-auto.sh
 image/grub.cfg
 image/genimage.cfg
 files/etc/init.d/rasputin-agent
 files/etc/init.d/rasputin-ipv4-only
 files/etc/init.d/rasputin-mgmt-harden
 files/etc/init.d/rasputin-trust-clean
+files/etc/init.d/rasputin-tailscale
+files/etc/init.d/rasputin-dhcp-auto
 files/etc/uci-defaults/99-rasputin
 files/etc/uci-defaults/98-rasputin-seed
 files/usr/lib/rasputin/apply-seed
