@@ -48,6 +48,25 @@
 #      It only fills an EMPTY field. A real hash delivered by the control
 #      plane (/usr/lib/rasputin/set-root-hash, geekdojo/geekdojo-brain#558)
 #      is left untouched, as is an already-locked field.
+#   4. The console asks for a login — `system.@system[0].ttylogin=1` — once,
+#      and only once, root actually HAS a password (F15, dec 6, and Bryce's
+#      2026-09-19 ruling on geekdojo/geekdojo-brain#587). Stock OpenWrt
+#      leaves ttylogin unset, and /usr/libexec/login.sh then does
+#      `exec /bin/login -f root`: the serial port and the BMC serial-over-LAN
+#      session hand out a root shell with no prompt at all. Verified in
+#      OpenWrt v25.12.5's package/base-files, the release this image builds
+#      from.
+#
+#      THE GATE IS THE POINT. ttylogin is turned on ONLY when root's shadow
+#      field is a real crypt hash. With the `*` lock of step 3, or an empty
+#      field, no password can ever authenticate, so a login prompt would not
+#      harden the box — it would lock the operator out of the one channel
+#      that still works when the network does not. So: no password, no
+#      prompt; a delivered password, a prompt. Never the other order.
+#
+#      It only ever turns ttylogin ON. An operator who set it deliberately is
+#      not overridden, and it is never set back to 0 — a box that once had a
+#      password does not go back to handing out a root shell.
 #
 # START=49: before uhttpd (START=50) and before dropbear (START=19 — already
 # started, which is why the dropbear step reloads), so on every boot — first
@@ -55,11 +74,10 @@
 # with no LAN window. The root-hash step has no ordering constraint; it rides
 # along here.
 #
-# NOTE ON SCOPE: this closes the NETWORK/rpcd vector (F16) and makes root's
-# credential unusable. The physical console still hands out a root shell
-# without a prompt while `system.@system[0].ttylogin` is 0 (OpenWrt's default,
-# askfirst -> shell). Closing that (F15) is a console-model decision
-# (geekdojo/geekdojo-brain dec 6) and is deliberately NOT taken here.
+# NOTE ON SCOPE: this closes the NETWORK/rpcd vector (F16) and the console one
+# (F15). What it does not decide is whether root has a password at all: that is
+# the control plane's to deliver, and until it does, every channel here is
+# key-only or unusable.
 
 START=49
 
@@ -154,6 +172,42 @@ harden_root_shadow() {
 	return 1
 }
 
+# root_has_password reports whether root's shadow field is a real crypt hash —
+# a modular-crypt value ($id$...), not empty and not a lock token. This is the
+# FACT that gates the console login prompt: a password exists, so a prompt can
+# be answered. Nothing here is clock-driven or "first boot" driven; the same
+# check gives the same answer on every boot, which is what makes it safe to
+# re-assert.
+root_has_password() {
+	[ -f "$SHADOW" ] || return 1
+	_f="$(awk -F: '$1=="root"{print $2; exit}' "$SHADOW")"
+	case "$_f" in
+		'$'?*'$'* ) return 0 ;;
+		* )         return 1 ;;
+	esac
+}
+
+# harden_console_login turns the console login prompt on once root has a
+# password. Returns 0 when it changed something.
+#
+# /usr/libexec/login.sh re-reads this value on EVERY console session (OpenWrt
+# v25.12.5 package/base-files: `[ "$(uci -q get system.@system[0].ttylogin)" =
+# 1 ] || exec /bin/login -f root`, run from inittab's `::askconsole:`), so a
+# commit takes effect on the next session without a reboot.
+harden_console_login() {
+	root_has_password || return 1        # no password yet: a prompt would lock us out
+
+	cur="$(uci -q get system.@system[0].ttylogin 2>/dev/null || true)"
+	[ "$cur" = 1 ] && return 1           # already on; steady-state boot changes nothing
+
+	uci -q batch <<-EOF
+		set system.@system[0].ttylogin='1'
+		commit system
+	EOF
+	logger -t rasputin "mgmt-harden: root has a delivered password, so the console now asks for a login (was: auto-root shell) [#587]"
+	return 0
+}
+
 boot() {
 	# On the boot path uhttpd has not started yet (START 49 < 50), so no reload
 	# is needed — it will read the loopback config when it starts. dropbear
@@ -166,6 +220,10 @@ boot() {
 		/etc/init.d/dropbear reload 2>/dev/null || /etc/init.d/dropbear restart 2>/dev/null || true
 	fi
 	harden_root_shadow || true
+	# AFTER the shadow floor, deliberately: the floor may have just written the
+	# `*` lock, and the gate must see the settled field rather than the one it
+	# was about to replace.
+	harden_console_login || true
 }
 
 # A manual `start` (operator or a bench run) does the same, and reloads uhttpd
@@ -177,6 +235,7 @@ start() {
 		/etc/init.d/dropbear reload 2>/dev/null || /etc/init.d/dropbear restart 2>/dev/null || true
 	fi
 	harden_root_shadow || true
+	harden_console_login || true
 	if [ "$changed" = 1 ] && [ -x /etc/init.d/uhttpd ]; then
 		/etc/init.d/uhttpd reload 2>/dev/null || /etc/init.d/uhttpd restart 2>/dev/null || true
 	fi
