@@ -71,12 +71,14 @@ scripts/rasputin-snort-rules-check.sh
 scripts/rasputin-release-tag-guard.sh
 scripts/release-target-guard.sh
 scripts/assemble-ab-image.sh
+scripts/agent-pin.sh
 scripts/validate-files.sh
 image/grub.cfg
 image/genimage.cfg
 files/etc/init.d/rasputin-agent
 files/etc/init.d/rasputin-ipv4-only
 files/etc/init.d/rasputin-mgmt-harden
+files/etc/init.d/rasputin-trust-clean
 files/etc/uci-defaults/99-rasputin
 files/etc/uci-defaults/98-rasputin-seed
 files/usr/lib/rasputin/apply-seed
@@ -89,6 +91,7 @@ files/etc/sysctl.d/99-rasputin-no-ipv6.conf
 files/etc/snort/rasputin-extra.lua
 files/etc/rasputin/seed.env.template
 files/etc/rasputin/trust/README.md
+files/lib/upgrade/keep.d/rasputin
 "
 
 echo "1. Shell syntax"
@@ -126,6 +129,38 @@ for f in $REQUIRED; do
 	[ -e "$f" ] || bad "missing: $f"
 done
 note "checked $(echo "$REQUIRED" | grep -c .) path(s)"
+
+echo "4. The sysupgrade keep list never carries the trust anchor"
+#    geekdojo/geekdojo-brain#531. /etc/rasputin/trust/root-ca.pem decides which
+#    images this box will install; preserving it across sysupgrade made the
+#    anchor a property of the overlay rather than of the image, so a reflash
+#    could not replace it. The whole-directory entry this list used to carry
+#    (`/etc/rasputin/`) swept it up implicitly, which is why a bare directory
+#    entry is refused too — re-adding one would silently undo the fix.
+#
+#    scripts/test-apply-seed.sh asserts the same property against the REAL
+#    `sysupgrade -l` inside the image. This is the cheap version that runs on
+#    every PR with no image download.
+KEEPD=files/lib/upgrade/keep.d/rasputin
+keep_entries() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$KEEPD"; }
+if [ -f "$KEEPD" ]; then
+	keep_checked=0
+	while IFS= read -r entry; do
+		[ -n "$entry" ] || continue
+		keep_checked=$((keep_checked + 1))
+		case "$entry" in
+			/etc/rasputin/trust*)
+				bad "$KEEPD carries '$entry' — the trust anchor must not survive sysupgrade (#531)" ;;
+			/etc/rasputin/|/etc/rasputin)
+				bad "$KEEPD carries the whole of '$entry', which sweeps up trust/ — list the paths individually (#531)" ;;
+		esac
+	done <<-EOF
+	$(keep_entries)
+	EOF
+	note "checked $keep_checked keep.d entr(ies)"
+else
+	bad "missing: $KEEPD"
+fi
 
 echo ""
 if [ "$fail" -ne 0 ]; then

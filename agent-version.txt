@@ -1,17 +1,32 @@
 # Pinned rasputin-agent release baked into the firewall image.
 #
 # SINGLE SOURCE OF TRUTH — both .github/workflows/release.yml and canary.yml
-# read this file, so the pin can NEVER drift between them. To bump the agent:
-# edit the bare version line at the bottom (and add a changelog entry).
+# read this file (through scripts/agent-pin.sh), so the pin can NEVER drift
+# between them. To bump the agent: edit BOTH payload lines at the bottom — the
+# bare version and its sha256 — and add a changelog entry.
 #
 # The agent is downloaded as a pre-built amd64 tarball from the
 # geekdojo/rasputin-control-plane release `v<this>` (static CGO_ENABLED=0 Go,
 # runs on OpenWrt musl). The version must ALREADY be published there before a
 # firewall build that pins it — the build downloads it by URL.
 #
-# Format: lines starting with `#` and blank lines are ignored; the first
-# remaining line is the bare CalVer version, YYYY.MM.MICRO with an optional
-# -dev.N suffix (no leading `v`).
+# Format: lines starting with `#` and blank lines are ignored. Exactly two
+# payload lines remain, in this order:
+#   1. the bare CalVer version, YYYY.MM.MICRO with an optional -dev.N suffix
+#      (no leading `v`);
+#   2. the tarball's sha256 in Buildroot hash-file format —
+#      `sha256  <64 hex>  rasputin-agent-<version>-linux-amd64.tar.gz` —
+#      copied verbatim from that release's published `.hash` asset:
+#        gh release download v<version> --repo geekdojo/rasputin-control-plane \
+#          --pattern 'rasputin-agent-<version>-linux-amd64.tar.gz.hash' --dir .
+#
+# WHY THE HASH (geekdojo/geekdojo-brain#533): a version names a release ASSET,
+# and a release asset can be replaced after publication, so the version alone
+# never pinned the bytes. rasputin-os has always hashed this tarball
+# (os/package/rasputin-agent/rasputin-agent.hash, enforced by Buildroot); this
+# gives the firewall the same guarantee. The filename inside the hash line must
+# name the pinned version, so a version bump that forgets the hash fails the
+# build instead of baking an unpinned binary.
 #
 # Changelog (why each bump):
 #   v0.2.0 (2026-06-08): IDS subsystem — snort3 alert_fast tailer + NATS publish
@@ -627,4 +642,8 @@
 #                        issue is open. Snort community rules current at ae74ed6d
 #                        (upstream unchanged since 2026-09-17 13:03 UTC). OpenWrt base
 #                        unchanged.
+#   sha256 pinned (2026-09-19): the existing dev.171 pin gains the tarball's
+#                        sha256, taken from the release's published .hash asset.
+#                        No agent change (geekdojo/geekdojo-brain#533).
 2026.09.4-dev.171
+sha256  f30deeb9833d233d12852532e1439101ab0bf045c54bd08f3fe7026b51061f42  rasputin-agent-2026.09.4-dev.171-linux-amd64.tar.gz

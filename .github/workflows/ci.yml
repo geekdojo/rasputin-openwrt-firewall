@@ -21,8 +21,9 @@
 ##   Plus the behavioural tests release.yml's validate job also runs:
 ##   scripts/test-node-id.sh, scripts/test-bus-pin.sh, scripts/test-set-root-hash.sh,
 ##   scripts/test-mgmt-harden.sh, scripts/test-seed-scrub.sh,
-##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh and
-##   scripts/test-release-target-guard.sh.
+##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh,
+##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh and
+##   scripts/test-agent-pin.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -103,6 +104,26 @@ jobs:
       - name: mgmt-harden helper tests
         timeout-minutes: 5
         run: sh scripts/test-mgmt-harden.sh
+
+      # rasputin-trust-clean removes the overlay copy of the trust anchor so a
+      # reflash can no longer carry a stale root forward
+      # (geekdojo/geekdojo-brain#531). It deletes the file that decides which
+      # images this box installs, so its refusals are pinned case by case —
+      # including the one that must NOT delete, an image shipping no anchor of
+      # its own. Table-tested under dash, bash and busybox ash.
+      - name: trust-clean helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-trust-clean.sh
+
+      # The vendored rasputin-agent tarball's hash pin
+      # (geekdojo/geekdojo-brain#533). A release asset can be replaced after
+      # publication, so the version line alone never pinned the bytes; every way
+      # the parser could fail open is a case here. No network.
+      - name: Agent pin tests
+        timeout-minutes: 5
+        run: ./scripts/test-agent-pin.sh
 
       # The seed scrub blanks a credential on a FAT during first-boot
       # provisioning, where uci-defaults self-delete and there is no second

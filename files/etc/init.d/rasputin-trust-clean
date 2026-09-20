@@ -1,0 +1,96 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-trust-clean — make the image's trust anchor the one that is used, by
+# removing any copy of it that survives on the overlay.
+#
+# WHY (geekdojo/geekdojo-brain#531)
+#   /etc/rasputin/trust/root-ca.pem decides which signed images this box will
+#   install. It ships inside the rootfs, injected by CI from the org variable.
+#   Two mechanisms used to carry a DIFFERENT copy forward on top of it:
+#
+#     1. /lib/upgrade/keep.d/rasputin preserved all of /etc/rasputin/ across a
+#        sysupgrade, trust/ included. That entry is gone as of #531.
+#     2. An A/B slot update does not use keep.d at all — it keeps the whole
+#        extroot /overlay — so a copy written before #531 is still there on
+#        every fielded box, and will stay there through every future OTA.
+#
+#   Because /etc is an overlayfs, the overlay's copy WINS over the image's: the
+#   agent opens /etc/rasputin/trust/root-ca.pem and gets the old bytes, not the
+#   ones in this release's squashfs. A reflash — the action an operator takes to
+#   return a box to a known state — could not replace the anchor. So (2) is the
+#   reason this is an init script rather than a uci-default: uci-defaults run
+#   only on a fresh overlay and self-delete, which is exactly the population this
+#   has to reach. Same reasoning as rasputin-mgmt-harden, and the same mechanism
+#   validated over OTA by rasputin-ipv4-only (#132): ImageBuilder stamps the
+#   rc.d symlink into the squashfs, so an upgraded slot runs it too.
+#
+# WHAT IT DOES
+#   If the overlay holds its own /etc/rasputin/trust/root-ca.pem, delete it so
+#   the image's file (/rom/etc/rasputin/trust/root-ca.pem) shows through. If the
+#   two differed, say so loudly with both fingerprints first — that is an
+#   operator-placed or rotated anchor being dropped, and it must not vanish in
+#   silence. If they were identical, it is bookkeeping and logs at info.
+#
+#   Idempotent: after the first boot there is nothing on the overlay and this
+#   does nothing. It never touches /rom, never writes an anchor, and never runs
+#   when the image ships no anchor of its own — removing the overlay copy would
+#   then leave the box with NO trust root, which is a worse state than a stale
+#   one and is not this script's decision to make.
+#
+# START=10: before rasputin-agent (90), which reads the anchor at startup, and
+# before anything that could act on an update. Nothing it depends on runs later
+# than the overlay mount, which happens at preinit.
+START=10
+
+OVERLAY_ROOT=${RASPUTIN_TRUST_OVERLAY_ROOT:-/overlay/upper}
+ROM_ROOT=${RASPUTIN_TRUST_ROM_ROOT:-/rom}
+TRUST_REL=etc/rasputin/trust/root-ca.pem
+
+log() { logger -t rasputin-trust-clean "$@"; echo "rasputin-trust-clean: $*"; }
+
+# Fingerprint a PEM, or print "unreadable". Only ever used for the log line, so
+# a box without openssl still cleans up — it just reports sizes instead.
+fingerprint() {
+	if command -v openssl >/dev/null 2>&1; then
+		openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null \
+			| sed 's/^.*=//' || echo unreadable
+	else
+		echo "$(wc -c < "$1" 2>/dev/null || echo 0) bytes (no openssl to fingerprint)"
+	fi
+}
+
+start() {
+	overlay_copy="$OVERLAY_ROOT/$TRUST_REL"
+	rom_copy="$ROM_ROOT/$TRUST_REL"
+
+	# Not an overlay layout (a plain rootfs, or a test rig): nothing to reconcile.
+	if [ ! -d "$OVERLAY_ROOT" ] || [ ! -d "$ROM_ROOT" ]; then
+		return 0
+	fi
+
+	[ -e "$overlay_copy" ] || return 0
+
+	if [ ! -s "$rom_copy" ]; then
+		# The image carries no anchor of its own (the build warns when the org
+		# variable is empty). Dropping the overlay's copy would leave the box
+		# with nothing to verify against, so keep it and say why.
+		log "WARNING: overlay holds $TRUST_REL but this image ships no trust anchor at $rom_copy — KEEPING the overlay copy. This image cannot verify signed artifacts on its own; rebuild it with RASPUTIN_ROOT_CA_PEM set."
+		return 0
+	fi
+
+	if cmp -s "$overlay_copy" "$rom_copy"; then
+		log "removing redundant overlay copy of $TRUST_REL (identical to the image's)"
+	else
+		log "WARNING: removing an overlay copy of $TRUST_REL that DIFFERS from this image's. The image's anchor is now in force. removed=$(fingerprint "$overlay_copy") image=$(fingerprint "$rom_copy")"
+	fi
+
+	if rm -f "$overlay_copy"; then
+		# The parent dirs are in the image, so an emptied overlay dir is
+		# harmless; remove it anyway when it is empty, to leave no trace that
+		# reads like state.
+		rmdir "$(dirname "$overlay_copy")" 2>/dev/null
+		log "overlay copy removed; the anchor now comes from the image"
+	else
+		log "ERROR: could not remove $overlay_copy — this box is still using an anchor from its overlay, not from this image"
+	fi
+}
