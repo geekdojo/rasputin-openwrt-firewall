@@ -14,9 +14,10 @@ start_service() {
 	# Read UCI config (set by uci-defaults/99-rasputin from the seed).
 	. /lib/functions.sh
 	config_load rasputin
-	local nats_url join_token node_role node_id cluster_id bus_pin
+	local nats_url join_token join_token_file node_role node_id cluster_id bus_pin
 	config_get nats_url   main nats_url
 	config_get join_token main join_token
+	config_get join_token_file main join_token_file /etc/rasputin/join.token
 	config_get node_role  main node_role  firewall
 	config_get node_id    main node_id
 	config_get cluster_id main cluster_id rasputin
@@ -48,11 +49,56 @@ start_service() {
 		return 0
 	fi
 
+	# The join token lives in its own 0600 file, and UCI carries only the path
+	# (geekdojo/geekdojo-brain#537). A box seeded before that has the token as
+	# rasputin.main.join_token instead, in a world-readable config file; move
+	# it here, because apply-seed does not re-run on its own after an A/B slot
+	# update — the overlay, /etc/config/rasputin included, is carried straight
+	# across. The commit fires this service's own reload trigger once; the next
+	# pass finds no legacy option and does nothing, so it settles immediately.
+	#
+	# Written to a temp file and renamed, and UCI is only cleared once that
+	# succeeded: a box must never end up with the token in neither place.
+	if [ -n "$join_token" ] && [ ! -s "$join_token_file" ]; then
+		local jt_tmp="$join_token_file.tmp.$$"
+		rm -f "$jt_tmp" 2>/dev/null
+		if mkdir -p "$(dirname "$join_token_file")" \
+			&& (umask 077 && printf '%s\n' "$join_token" > "$jt_tmp") \
+			&& chmod 600 "$jt_tmp" \
+			&& mv -f "$jt_tmp" "$join_token_file" \
+			&& [ -s "$join_token_file" ]
+		then
+			uci -q set rasputin.main.join_token_file="$join_token_file"
+			uci -q delete rasputin.main.join_token
+			uci -q commit rasputin
+			logger -t rasputin-agent "moved the join token out of /etc/config/rasputin into $join_token_file (0600)"
+		else
+			rm -f "$jt_tmp" 2>/dev/null
+			logger -t rasputin-agent "WARNING: could not write the join token to $join_token_file; leaving it in /etc/config/rasputin and retrying next start"
+		fi
+	fi
+
 	procd_open_instance
 	procd_set_param command /usr/bin/rasputin-agent
 	procd_append_param env RASPUTIN_NODE_ROLE="$node_role"
 	procd_append_param env RASPUTIN_NATS_URL="$nats_url"
-	procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
+	# The token is handed over as a PATH, not a value: one 0600 file the agent
+	# re-reads on every connect attempt (geekdojo/geekdojo-brain#537). Passed
+	# even when the file is not there yet — a token that arrives later (a seed
+	# applied, a re-mint) is then picked up on the next reconnect with no
+	# restart, and until it does the bus refuses the node exactly as it always
+	# has for a node with no token.
+	#
+	# The legacy inline value is passed ONLY when the migration above could not
+	# write the file, so that a box whose /etc/rasputin is unwritable keeps the
+	# credential it already has instead of dropping off the bus. An agent that
+	# gets both prefers the file; this deliberately passes one or the other.
+	if [ ! -s "$join_token_file" ] && [ -n "$join_token" ]; then
+		logger -t rasputin-agent "WARNING: $join_token_file is missing, so the join token is being passed inline from /etc/config/rasputin. Fix $join_token_file: an inline token cannot be re-read while the agent runs."
+		procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
+	else
+		procd_append_param env RASPUTIN_CP_JOIN_TOKEN_FILE="$join_token_file"
+	fi
 	procd_append_param env RASPUTIN_NODE_ID="$node_id"
 	# The cluster's name, which the agent turns into "<cluster-id>.local" for
 	# hostsync. Always passed (with a default) rather than conditionally: an

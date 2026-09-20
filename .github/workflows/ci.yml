@@ -186,8 +186,11 @@ jobs:
       # init.d/rasputin-agent reads it back into the agent's environment (only
       # procd's calls are stubbed). Covers the bus pin end to end, a malformed
       # pin refused with nothing applied, RASPUTIN_BUS_KEY never applied and
-      # blanked, and sysupgrade's keep list carrying both pin locations.
-      # (geekdojo/geekdojo-brain#448)
+      # blanked, and sysupgrade's keep list carrying both pin locations
+      # (geekdojo/geekdojo-brain#448); and the join token landing in its own
+      # 0600 file, never in /etc/config/rasputin and never in the agent's
+      # environment, including the migration of a box seeded before that
+      # (geekdojo/geekdojo-brain#537).
       - name: apply-seed functional test
         timeout-minutes: 10
         env:
