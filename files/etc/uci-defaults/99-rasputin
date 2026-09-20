@@ -150,30 +150,24 @@ EOF
 
 # --- Mesh CA trust for tailscaled ---
 #
-# tailscaled is a Go daemon and trusts the self-hosted headscale's TLS via
-# the system cert pool. The per-installation Mesh CA isn't a public root, so
-# the rasputin-agent installs it on mesh enrollment: it APPENDS the Mesh CA
-# to /etc/ssl/certs/ca-certificates.crt — the first path Go's crypto/x509
-# reads — then runs `/etc/init.d/tailscale restart`. Public DERP roots stay
-# trusted (they're in the same bundle, shipped by ca-bundle). No env hook is
-# needed in the stock tailscale init, which is why we do it agent-side: that
-# init reads only log/port/state_file/fw_mode from UCI and forwards no
-# arbitrary env to the daemon, and we must not override it (the package
-# replaces its init on upgrade).
+# tailscaled is a Go daemon and trusts the self-hosted headscale's TLS through
+# the per-installation Mesh CA, which is not a public root. rasputin-agent
+# writes that CA to /etc/rasputin/mesh/tailscaled-ca.pem (RASPUTIN_MESH_CA_BUNDLE,
+# env on the agent service below) on mesh enrollment, and tailscaled is pointed
+# at it with SSL_CERT_FILE by files/etc/init.d/rasputin-tailscale — Rasputin's
+# own procd service for the daemon, which also disables the stock one. Go reads
+# SSL_CERT_FILE instead of its built-in bundle list but still walks
+# /etc/ssl/certs, so the public DERP roots keep loading.
 #
-# The agent ALSO writes the CA to RASPUTIN_MESH_CA_BUNDLE
-# (/etc/rasputin/mesh/tailscaled-ca.pem, env on the agent service below) — on
-# this image that copy is the persistent record used to re-heal trust; on the
-# Buildroot OS (read-only /etc) the same file is what tailscaled reads via
-# SSL_CERT_FILE. One agent, both mechanisms; each no-ops where it doesn't fit.
+# It is NOT appended to /etc/ssl/certs/ca-certificates.crt any more. That append
+# made the Mesh CA — which carries no name constraints — an anchor for every TLS
+# client on the box, for every name, and it was silently undone by any ca-bundle
+# package upgrade. rasputin-tailscale strips a leftover append on first start
+# (geekdojo/geekdojo-brain#542).
 #
-# KNOWN FOLLOW-UP: a `ca-bundle` package upgrade (only via sysupgrade, not a
-# plain reboot — /etc is the persistent overlay) rewrites
-# /etc/ssl/certs/ca-certificates.crt and drops the appended Mesh CA. Trust is
-# restored on the next mesh enroll/reconcile; a boot-time re-append from the
-# persisted RASPUTIN_MESH_CA_BUNDLE copy is the planned hardening (tracked in
-# the wiki backlog). BENCH-VERIFY: after enroll, `tailscale status` Running +
-# the CA present in /etc/ssl/certs/ca-certificates.crt.
+# BENCH-VERIFY: after enroll, `tailscale status` Running, and the Mesh CA
+# present in /etc/rasputin/mesh/tailscaled-ca.pem and ABSENT from
+# /etc/ssl/certs/ca-certificates.crt.
 mkdir -p /etc/rasputin/mesh /etc/tailscale
 
 # --- Enable services (do not start yet — uci-defaults runs pre-procd) ---
@@ -200,7 +194,14 @@ mkdir -p /etc/rasputin/mesh /etc/tailscale
 # mechanism; it deliberately carries no `enable` line here.
 /etc/init.d/rasputin-agent enable
 /etc/init.d/snort enable
-/etc/init.d/tailscale enable
+# The STOCK tailscale service is disabled, not enabled: tailscaled runs under
+# files/etc/init.d/rasputin-tailscale, which gives it SSL_CERT_FILE. Doing it
+# here means a fresh flash never starts the env-less daemon even once; an
+# upgraded box is covered by rasputin-tailscale itself, which disables the
+# stock service on every start (geekdojo/geekdojo-brain#542). rasputin-tailscale
+# carries no `enable` line for the reason in the note above — the image bakes
+# its rc.d symlink, which is what reaches OTA-upgraded boxes.
+/etc/init.d/tailscale disable
 # Conflict-aware LAN DHCP: decide (each boot, before dnsmasq) whether to serve
 # DHCP based on whether another server is already present. Serves it when we're
 # the router (Mode A/C bootstrap — the cluster needs addresses to reach the

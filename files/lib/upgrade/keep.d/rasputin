@@ -22,6 +22,13 @@
 #                      and bus/pin: the bus pin a controlplane delivered
 #                      over the bus to a node enrolled before pins existed
 #                      (geekdojo/geekdojo-brain#448).
+#   - deployment-mode  the deployment mode the controlplane last set through
+#                      firewall.set_active, written by rasputin-agent. It
+#                      decides the LAN DHCP role on every boot
+#                      (files/etc/init.d/rasputin-dhcp-auto,
+#                      geekdojo/geekdojo-brain#543): without it the box falls
+#                      back to the boot-time probe, i.e. to whatever answers a
+#                      DHCP DISCOVER first.
 #
 # The bus pin is trust material and survives sysupgrade through this entry
 # twice over: a seeded pin as RASPUTIN_BUS_PIN in seed.env, a delivered one as
@@ -30,10 +37,9 @@
 #
 # /etc/config/rasputin (UCI) is deliberately NOT in this list — it's
 # regenerated from seed.env by /usr/lib/rasputin/apply-seed, which
-# uci-defaults/99-rasputin runs on a fresh overlay and sysupgrade-preserve.sh
-# runs after restoring /etc/rasputin/. (An A/B slot update keeps the overlay,
-# UCI included, and regenerates nothing.) Preserving it would just mask
-# seed.env changes.
+# uci-defaults/99-rasputin runs on a fresh overlay. (An A/B slot update keeps
+# the overlay, UCI included, and regenerates nothing.) Preserving it would just
+# mask seed.env changes.
 #
 # Discovered during the CWWK x86-p5-n100 sysupgrade test 2026-06-07.
 #
@@ -63,6 +69,7 @@
 /etc/rasputin/join.token
 /etc/rasputin/agent-state/
 /etc/rasputin/hosts/
+/etc/rasputin/deployment-mode
 
 # Snort3 (IDS):
 #   - /etc/config/snort        operator UCI tuning (changing home_net,

@@ -68,8 +68,8 @@ fi
 #     unprovisioned, and leaves the key sitting in the seed.
 #   - Ignore it, say so loudly, and blank it from the staged seed: the box
 #     provisions, the secret stops sitting at rest in /etc/rasputin/seed.env
-#     (which is kept across sysupgrade and copied off-box by
-#     sysupgrade-preserve.sh), and the log names the mistake. This one.
+#     (which is kept across sysupgrade), and the log names the mistake. This
+#     one.
 # It is never written to UCI and never reaches the agent: init.d/rasputin-agent
 # builds the agent's environment from UCI, not from this file. The copy on the
 # seed FAT is blanked with the join token by scrub-seed-token.

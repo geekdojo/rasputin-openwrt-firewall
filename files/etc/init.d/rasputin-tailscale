@@ -1,0 +1,196 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-tailscale — Rasputin's own procd service for tailscaled, so the
+# daemon trusts the per-installation Mesh CA through SSL_CERT_FILE instead of
+# through an append to the box's global CA bundle.
+#
+# WHY THIS EXISTS
+#   tailscaled must trust the self-hosted Headscale's HTTPS leaf, which is
+#   signed by the per-installation Mesh CA — not a public root. Until now the
+#   agent got that trust by APPENDING the Mesh CA to
+#   /etc/ssl/certs/ca-certificates.crt, because the stock tailscale init
+#   (shipped by the OpenWrt package) forwards no arbitrary env to the daemon.
+#
+#   An append to the global bundle makes that CA an anchor for EVERY TLS client
+#   on the box for EVERY name, not just for tailscaled talking to Headscale.
+#   The Mesh CA carries no name constraints, so the blast radius of the append
+#   is "any certificate the Mesh CA signs, for any host, trusted by anything on
+#   this box". Narrowing it back to one daemon is the whole point of this file.
+#
+#   SSL_CERT_FILE is the hook Go gives us. crypto/x509 reads the file named by
+#   SSL_CERT_FILE *instead of* its built-in list of bundle files, but it STILL
+#   walks its certificate DIRECTORIES (root_linux.go: /etc/ssl/certs,
+#   /etc/pki/tls/certs). On this image /etc/ssl/certs holds ca-certificates.crt,
+#   so the public roots tailscaled needs for Tailscale's DERP relays keep
+#   loading from the directory walk while the Mesh CA comes from the file. The
+#   Buildroot OS reaches the same end through a systemd drop-in on
+#   tailscaled.service; this is the procd equivalent, and the file it points at
+#   is the same one the agent already writes (RASPUTIN_MESH_CA_BUNDLE).
+#
+#   A missing bundle (a box that has never enrolled) is not an error: the file
+#   read fails, the directory walk still yields the public roots, and the agent
+#   restarts this service when it installs the CA.
+#
+# WHY AN INIT SCRIPT, NOT uci-defaults
+#   uci-defaults run only on a fresh overlay and then self-delete, so a box
+#   carried across an A/B slot update would never pick this up. ImageBuilder
+#   stamps an rc.d symlink for every init script under files/ into the squashfs,
+#   so a new init script reaches OTA-upgraded boxes too — the mechanism
+#   rasputin-ipv4-only (#132) and rasputin-mgmt-harden were validated on. This
+#   file therefore carries no `enable` line in 99-rasputin.
+#
+# START=85: after the stock S80tailscale (so stopping it is deterministic in
+# the same boot, whatever order the rc.d glob was expanded in) and before
+# S90rasputin-agent, so the agent finds the daemon it will later restart
+# already running under this service.
+#
+# ON EVERY START IT ALSO:
+#   - disables the stock tailscale service, so on the next boot it does not
+#     start a second, env-less daemon on the same state file and port;
+#   - strips any Mesh CA block a previous agent appended to the global bundle,
+#     which is the mechanism this file replaces. Fail-closed: the bundle is
+#     rewritten only when the certificate count drops by exactly the number of
+#     managed blocks removed, so a truncated or unexpected bundle is left
+#     alone with a warning rather than damaged.
+
+USE_PROCD=1
+START=85
+STOP=10
+
+# The Mesh CA bundle the agent writes on enrollment. Same path the agent is
+# given as RASPUTIN_MESH_CA_BUNDLE in files/etc/init.d/rasputin-agent — the two
+# MUST agree, which is why both name the literal and neither derives it.
+# RASPUTIN_MESH_CA_BUNDLE lets the behaviour tests point it elsewhere.
+MESH_CA_BUNDLE="${RASPUTIN_MESH_CA_BUNDLE:-/etc/rasputin/mesh/tailscaled-ca.pem}"
+
+# The box's global trust bundle, and the marker the agent used to delimit its
+# append (agent/internal/tailscale/trust.go). RASPUTIN_CA_BUNDLE_FILE is for the
+# behaviour tests; it is never set on the box.
+CA_BUNDLE="${RASPUTIN_CA_BUNDLE_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+CA_MARKER='# rasputin-mesh-ca (managed by rasputin-agent)'
+
+# The stock service this one replaces. RASPUTIN_STOCK_TAILSCALE_INIT is for the
+# behaviour tests.
+STOCK_INIT="${RASPUTIN_STOCK_TAILSCALE_INIT:-/etc/init.d/tailscale}"
+
+# strip_mesh_ca_from_bundle removes every Mesh CA block a previous agent
+# appended to the global trust bundle. Returns 0 when the file was rewritten,
+# 1 when there was nothing to do or the rewrite was refused.
+#
+# Refusing is the important half. This file is what every TLS client on the box
+# trusts; damaging it is far worse than leaving a stale append in place. So the
+# rewrite is committed only when the remaining certificate count is exactly the
+# original count minus the number of managed blocks removed.
+strip_mesh_ca_from_bundle() {
+	[ -f "$CA_BUNDLE" ] || return 1
+	# `grep -c` prints 0 and exits 1 when nothing matches, so `|| true` (never
+	# `|| echo 0`, which would print a second line and break every later test).
+	markers="$(grep -c "^$CA_MARKER\$" "$CA_BUNDLE" 2>/dev/null || true)"
+	[ "${markers:-0}" -gt 0 ] || return 1
+
+	before="$(grep -c '^-----BEGIN CERTIFICATE-----$' "$CA_BUNDLE" 2>/dev/null || true)"
+	before="${before:-0}"
+	tmp="$CA_BUNDLE.rasputin.$$"
+	rm -f "$tmp" 2>/dev/null
+
+	# Skip from the marker line through the END of the certificate that
+	# follows it. A marker with no terminating END eats to EOF, which the
+	# count check below then refuses.
+	if ! awk -v marker="$CA_MARKER" '
+		$0 == marker { skip = 1; next }
+		skip && $0 == "-----END CERTIFICATE-----" { skip = 0; next }
+		skip { next }
+		{ print }
+	' "$CA_BUNDLE" > "$tmp" 2>/dev/null; then
+		rm -f "$tmp" 2>/dev/null
+		logger -t rasputin "tailscale: WARNING — could not rewrite $CA_BUNDLE; the appended Mesh CA is still in the global trust bundle"
+		return 1
+	fi
+
+	after="$(grep -c '^-----BEGIN CERTIFICATE-----$' "$tmp" 2>/dev/null || true)"
+	after="${after:-0}"
+	want=$((before - markers))
+	if [ "$after" != "$want" ] || [ "$after" -le 0 ]; then
+		rm -f "$tmp" 2>/dev/null
+		logger -t rasputin "tailscale: WARNING — refusing to rewrite $CA_BUNDLE: $before certificate(s) and $markers managed block(s) in, $after out (expected $want). Left unchanged."
+		return 1
+	fi
+
+	if chmod 644 "$tmp" 2>/dev/null && mv -f "$tmp" "$CA_BUNDLE" 2>/dev/null; then
+		logger -t rasputin "tailscale: removed $markers appended Mesh CA block(s) from $CA_BUNDLE; tailscaled now trusts the Mesh CA through SSL_CERT_FILE=$MESH_CA_BUNDLE only"
+		return 0
+	fi
+	rm -f "$tmp" 2>/dev/null
+	logger -t rasputin "tailscale: WARNING — could not replace $CA_BUNDLE; the appended Mesh CA is still in the global trust bundle"
+	return 1
+}
+
+# disable_stock_tailscale takes the stock service out of the boot sequence and
+# stops it if it is running. Returns 0 when it disabled an enabled service.
+#
+# Stopping is unconditional and idempotent: the stock stop_service runs
+# `tailscaled --cleanup`, which is exactly what this service's own start does
+# next, so a redundant stop costs nothing. It matters on the ONE boot after an
+# upgrade, where S80tailscale has already started an env-less daemon on the
+# same state file and port before this service runs.
+disable_stock_tailscale() {
+	[ -x "$STOCK_INIT" ] || return 1
+	changed=1
+	if "$STOCK_INIT" enabled 2>/dev/null; then
+		"$STOCK_INIT" disable >/dev/null 2>&1 && changed=0
+		logger -t rasputin "tailscale: disabled the stock tailscale service; tailscaled runs under rasputin-tailscale with SSL_CERT_FILE=$MESH_CA_BUNDLE"
+	fi
+	"$STOCK_INIT" stop >/dev/null 2>&1
+	return "$changed"
+}
+
+start_service() {
+	strip_mesh_ca_from_bundle || true
+	disable_stock_tailscale || true
+
+	# The bundle's directory must exist before tailscaled starts, so the agent
+	# can drop the CA in without a mkdir race. 99-rasputin creates it on a fresh
+	# flash; this covers an upgraded box whose overlay predates that.
+	mkdir -p "$(dirname "$MESH_CA_BUNDLE")" 2>/dev/null
+
+	# The same options, with the same defaults, as the stock init reads from
+	# /etc/config/tailscale (verified against the shipped OpenWrt 25.12.5
+	# tailscale.init and openwrt/packages master, 2026-09-19). Rasputin ships
+	# that config file; see its comments for why each value is pinned.
+	local state_file port std_err std_out fw_mode
+	config_load tailscale
+	config_get_bool std_out "settings" log_stdout 1
+	config_get_bool std_err "settings" log_stderr 1
+	config_get port "settings" port 41641
+	config_get state_file "settings" state_file /etc/tailscale/tailscaled.state
+	config_get fw_mode "settings" fw_mode nftables
+
+	/usr/sbin/tailscaled --cleanup
+
+	procd_open_instance
+	procd_set_param command /usr/sbin/tailscaled
+	# Trust the per-installation Mesh CA — the one line this whole file exists
+	# for. Public roots still load from the /etc/ssl/certs directory walk.
+	procd_set_param env SSL_CERT_FILE="$MESH_CA_BUNDLE"
+	# Required since tailscale v1.48.1 to select the firewall backend;
+	# Rasputin is nftables-only.
+	procd_append_param env TS_DEBUG_FIREWALL_MODE="$fw_mode"
+	# No logging to log.tailscale.com.
+	procd_append_param env TS_NO_LOGS_NO_SUPPORT=true
+	procd_append_param command --port "$port"
+	procd_append_param command --state "$state_file"
+	procd_set_param respawn
+	procd_set_param stdout "$std_out"
+	procd_set_param stderr "$std_err"
+	procd_close_instance
+}
+
+stop_service() {
+	/usr/sbin/tailscaled --cleanup
+}
+
+service_triggers() {
+	# Same trigger the stock service would have wanted: re-read /etc/config/
+	# tailscale when the operator or the control plane edits it.
+	procd_add_reload_trigger tailscale
+}

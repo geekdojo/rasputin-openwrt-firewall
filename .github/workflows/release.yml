@@ -147,6 +147,17 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
+      # The tailscale-init and dhcp-auto behaviour tests ci.yml runs on every
+      # PR, run again here. Both cover a decision the image makes once, at boot,
+      # on hardware: what tailscaled trusts (geekdojo/geekdojo-brain#542) and
+      # who serves LAN DHCP (geekdojo/geekdojo-brain#543).
+      - name: tailscale init tests
+        timeout-minutes: 5
+        run: sh scripts/test-tailscale-init.sh
+
+      - name: dhcp-auto tests
+        timeout-minutes: 5
+        run: sh scripts/test-dhcp-auto.sh
 
       # Same reasoning as the static checks above: run the identical behavioural
       # test a PR faced, at the point a finding is most expensive to discover.
