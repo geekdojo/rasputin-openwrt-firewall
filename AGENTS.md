@@ -16,7 +16,9 @@ Repo facts an agent should know:
   `.rootfs` OTA artifact, each with a detached DER `.sig`. Verify:
   `openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile rasputin-root-ca.pem`
   (root CA: https://rasputin.geekdojo.com/rasputin-root-ca.pem). Checksums:
-  `releases/latest/download/manifest.json`.
+  `releases/latest/download/manifest.json`, which is itself signed — verify
+  `manifest.json.sig` the same way before trusting a sha256 out of it. Releases
+  cut before 2026-09 have no `manifest.json.sig`.
 - The image is built with the OpenWrt ImageBuilder in CI. A rebuild is rarely
   content-free — the rolling upstream feed ships package/CVE changes even with zero repo
   commits.

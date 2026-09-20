@@ -90,19 +90,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Pinned agent version — read from ./agent-version.txt, the SAME
-          # single source release.yml uses, so this build mirrors a real
-          # release and the pin can't drift. Bump in agent-version.txt only.
-          VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
-          [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          # Pinned agent version + sha256 — read through scripts/agent-pin.sh from
+          # ./agent-version.txt, the SAME single source release.yml uses, so this
+          # build mirrors a real release and the pin can't drift. Bump in
+          # agent-version.txt only.
+          VER=$(./scripts/agent-pin.sh version)
+          TARBALL=$(./scripts/agent-pin.sh tarball)
           echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
-            --pattern "rasputin-agent-${VER}-linux-amd64.tar.gz" \
+            --pattern "$TARBALL" \
             --dir /tmp/agent --clobber
-          tar -xzf /tmp/agent/rasputin-agent-${VER}-linux-amd64.tar.gz \
-            -C files/usr/bin
+          # Same hash pin the release build enforces (geekdojo/geekdojo-brain#533).
+          # The canary exists to notice drift the pin files do not describe, so a
+          # replaced agent asset must surface HERE, on the schedule, rather than at
+          # the next release.
+          ./scripts/agent-pin.sh verify "/tmp/agent/$TARBALL"
+          tar -xzf "/tmp/agent/$TARBALL" -C files/usr/bin
           chmod +x files/usr/bin/rasputin-agent
 
       - name: Inject trust root from org variable

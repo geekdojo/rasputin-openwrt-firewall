@@ -350,11 +350,43 @@ echo "6. sysupgrade keeps the pin"
 # sysupgrade -l prints the files its backup would carry, walking keep.d.
 mkdir -p "$ROOT/etc/rasputin/agent-state/bus"
 printf '%s\n' "$PIN" > "$ROOT/etc/rasputin/agent-state/bus/pin"
+# Populate every path the keep list is asserted about below. sysupgrade -l only
+# prints files that EXIST, so an assertion about a path that was never created
+# passes for the wrong reason — including the one that matters most, that the
+# trust anchor is absent from the backup.
+mkdir -p "$ROOT/etc/rasputin/trust" "$ROOT/etc/rasputin/mesh"
+printf 'not-a-real-ca\n' > "$ROOT/etc/rasputin/trust/root-ca.pem"
+printf 'not-a-real-ca\n' > "$ROOT/etc/rasputin/mesh/tailscaled-ca.pem"
+[ -s "$ROOT/etc/rasputin/join.token" ] || printf 'tok\n' > "$ROOT/etc/rasputin/join.token"
 if in_chroot /sbin/sysupgrade -l > "$WORK/keep.txt" 2> "$WORK/keep.err"; then
 	grep -qx /etc/rasputin/seed.env "$WORK/keep.txt" && ok "seed.env (seeded pin) is in the sysupgrade backup" \
 		|| { bad "seed.env missing from sysupgrade -l"; sed 's/^/      /' "$WORK/keep.txt" >&2; }
 	grep -qx /etc/rasputin/agent-state/bus/pin "$WORK/keep.txt" && ok "agent-state/bus/pin (delivered pin) is in the sysupgrade backup" \
 		|| bad "agent-state/bus/pin missing from sysupgrade -l"
+
+	# geekdojo/geekdojo-brain#531: the trust anchor must NOT be carried across.
+	# It decides which images this box installs, and preserving it made the
+	# anchor a property of the overlay rather than of the image — so a reflash
+	# could not replace it. Asserted against the REAL sysupgrade -l, not against
+	# the keep.d text, because the two are only the same until someone adds a
+	# broader path back.
+	if grep -q '^/etc/rasputin/trust/' "$WORK/keep.txt"; then
+		bad "the trust anchor is in the sysupgrade backup — a reflash would carry a stale root forward:"
+		grep '^/etc/rasputin/trust/' "$WORK/keep.txt" | sed 's/^/      /' >&2
+	else
+		ok "trust/ is NOT in the sysupgrade backup (the image's anchor wins on the other side)"
+	fi
+
+	# The narrowing that made that possible must not have taken the rest with
+	# it: /etc/rasputin/ is no longer listed wholesale, so each surviving path
+	# is named, and a dropped one would silently unconfigure the box.
+	for keptpath in /etc/rasputin/join.token /etc/rasputin/mesh; do
+		if grep -q "^${keptpath}" "$WORK/keep.txt"; then
+			ok "$keptpath is still in the sysupgrade backup"
+		else
+			bad "$keptpath missing from sysupgrade -l — narrowing the keep list dropped it"
+		fi
+	done
 else
 	bad "sysupgrade -l failed in the chroot:"; sed 's/^/      /' "$WORK/keep.err" >&2
 fi

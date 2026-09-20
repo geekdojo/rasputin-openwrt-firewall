@@ -130,6 +130,24 @@ jobs:
         timeout-minutes: 5
         run: sh scripts/test-mgmt-harden.sh
 
+      # rasputin-trust-clean deletes the overlay copy of the trust anchor so the
+      # image's own anchor is the one in force (geekdojo/geekdojo-brain#531).
+      # Both ways it can be wrong are silent at boot: leave the copy and the fix
+      # did nothing; delete it on an image that ships no anchor and the box can
+      # verify nothing at all.
+      - name: trust-clean helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-trust-clean.sh
+
+      # The vendored agent's hash pin (geekdojo/geekdojo-brain#533). Runs before
+      # the build job downloads the tarball, so a pin whose two lines disagree
+      # stops the release here rather than after ImageBuilder.
+      - name: Agent pin tests
+        timeout-minutes: 5
+        run: ./scripts/test-agent-pin.sh
+
       # Same reasoning as the static checks above: run the identical behavioural
       # test a PR faced, at the point a finding is most expensive to discover.
       # The seed scrub blanks a credential during first-boot provisioning, and
@@ -235,8 +253,13 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           CHANNEL: ${{ steps.ver.outputs.channel }}
         run: |
-          PIN=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
-          [ -n "$PIN" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          # One parser for the pin, so this gate and the download step can never
+          # read agent-version.txt differently (geekdojo/geekdojo-brain#533).
+          # `sha256` is called for its exit status: a pin whose two lines
+          # disagree must stop the build HERE, before ImageBuilder runs, not at
+          # the download step twenty minutes later.
+          PIN=$(./scripts/agent-pin.sh version) || exit 1
+          ./scripts/agent-pin.sh sha256 >/dev/null || exit 1
           base() { printf '%s' "${1%%-dev.*}"; }
           if [ "$CHANNEL" = stable ]; then
             # STABLE is lockstep: a stable ships the exact-version agent, and
@@ -303,20 +326,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Pinned agent version — SINGLE SOURCE OF TRUTH is ./agent-version.txt
-          # (shared with canary.yml so the two can't drift). Bump there, with a
-          # changelog entry; the version must already be published on the
-          # control-plane repo. First non-comment line = the bare CalVer version.
-          VER=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' agent-version.txt | head -n1 | tr -d '[:space:]')
-          [ -n "$VER" ] || { echo "::error::agent-version.txt has no version line"; exit 1; }
+          # Pinned agent version + sha256 — SINGLE SOURCE OF TRUTH is
+          # ./agent-version.txt, read here through scripts/agent-pin.sh (shared
+          # with canary.yml so the two can't drift). Bump there, with a changelog
+          # entry; the version must already be published on the control-plane repo.
+          VER=$(./scripts/agent-pin.sh version)
+          TARBALL=$(./scripts/agent-pin.sh tarball)
           echo "pinned rasputin-agent: v$VER (from agent-version.txt)"
           mkdir -p /tmp/agent files/usr/bin
           gh release download "v$VER" \
             --repo geekdojo/rasputin-control-plane \
-            --pattern "rasputin-agent-${VER}-linux-amd64.tar.gz" \
+            --pattern "$TARBALL" \
             --dir /tmp/agent --clobber
-          tar -xzf /tmp/agent/rasputin-agent-${VER}-linux-amd64.tar.gz \
-            -C files/usr/bin
+          # Hash-pin the payload, not just the version (geekdojo/geekdojo-brain#533).
+          # A release asset can be replaced after publication, so an unchanged
+          # version line never meant unchanged bytes — and these are the bytes that
+          # verify every signed image this box will later install. Fails the build
+          # rather than baking a binary nobody pinned.
+          ./scripts/agent-pin.sh verify "/tmp/agent/$TARBALL"
+          tar -xzf "/tmp/agent/$TARBALL" -C files/usr/bin
           chmod +x files/usr/bin/rasputin-agent
           file files/usr/bin/rasputin-agent | head -1
 
@@ -669,6 +697,34 @@ jobs:
             /mnt/rasputin-sign/leaf.pem \
             || { echo "::error::leaf cert chain does not verify against root"; exit 1; }
 
+          # PURPOSE, not just chain (geekdojo/geekdojo-brain#526).
+          #
+          # Chaining to the root says the leaf is ours. It does not say the leaf
+          # is allowed to sign FIRMWARE. That authorization is carried in the
+          # leaf's extended key usage as 1.3.6.1.4.1.66587.1.1.1, the release
+          # purpose OID, and it is the intermediate's signature over the EKU that
+          # makes it authorization rather than a naming convention: the holder of
+          # a catalog leaf cannot grant themselves the release purpose
+          # (rasputin-control-plane artifactsig/eku.go).
+          #
+          # Everything downstream now enforces the OID — artifactsig on the node,
+          # and the laptop-side shell verifier in bootstrap.sh / flash.sh. A
+          # release signed by a leaf without it would chain, publish, and then be
+          # refused at install and at first flash. Check it at signing time, where
+          # the only cost is a failed run.
+          #
+          # Matched as a WHOLE TOKEN, comma- or line-end delimited: the raw string
+          # is a prefix of any future …1.1.1x OID, so a prefix test would accept a
+          # purpose that has not been minted yet (geekdojo/geekdojo-brain#474).
+          # `x509 -text` rather than `-ext`: -ext does not exist on LibreSSL, and
+          # this check is the same shape the laptop verifier runs.
+          leaf_eku=$(openssl x509 -in /mnt/rasputin-sign/leaf.pem -noout -text \
+            | grep -A1 'X509v3 Extended Key Usage' | tr -d '\r')
+          printf '%s\n' "$leaf_eku" \
+            | grep -Eq '(^|[ ,])1\.3\.6\.1\.4\.1\.66587\.1\.1\.1([ ,]|$)' \
+            || { echo "::error::signing leaf does not carry the release purpose OID 1.3.6.1.4.1.66587.1.1.1. Artifacts it signs would be refused by rasputin-agent and by the first-flash verifier. Got: $leaf_eku"; exit 1; }
+          echo "leaf carries the release purpose OID (1.3.6.1.4.1.66587.1.1.1)"
+
       - name: CMS-sign images + emit manifest.json
         run: |
           set -eu
@@ -739,6 +795,35 @@ jobs:
                signedBy:$signedBy, buildDate:$built}]}' \
             > release-out/manifest.json
 
+          # Sign the MANIFEST too (geekdojo/geekdojo-brain#526).
+          #
+          # Until this, the two artifacts were signed and the manifest that names
+          # them was not — so every consumer that starts from manifest.json
+          # (the control plane resolving an update, bootstrap.sh and flash.sh
+          # resolving a first flash) took the version, the asset names and the
+          # sha256s on HTTPS plus GitHub repo write alone. The sha256 of a signed
+          # artifact is only as good as the document it is read from.
+          #
+          # Same detached DER CMS recipe as the artifacts, and the same one
+          # rasputin-os has used for its manifest since 2026.08: the signature
+          # embeds leaf + intermediate, so the PUBLIC root CA alone verifies it,
+          # with no material from this runner.
+          #
+          # Old control planes ignore an asset they do not fetch, so publishing
+          # the .sig changes nothing for a fielded cluster until the api starts
+          # reading it.
+          sign_file manifest.json
+
+          # Prove the published verify command passes BEFORE shipping it. A
+          # signature that does not verify is worse than none: it is published,
+          # it looks like a control, and the first thing it fails is a first
+          # flash by a new operator.
+          openssl cms -verify -binary -inform DER \
+            -in release-out/manifest.json.sig \
+            -content release-out/manifest.json \
+            -CAfile /mnt/rasputin-sign/root-ca.pem -out /dev/null \
+            || { echo "::error::manifest.json.sig does not verify against the root CA"; exit 1; }
+
           echo "----- release-out/ -----" && ls -lh release-out/
           echo "----- manifest.json -----" && cat release-out/manifest.json
 
@@ -780,7 +865,7 @@ jobs:
           gh release create "$TAG" \
             --target "$TARGET_SHA" \
             --title "Rasputin OpenWrt Firewall ${{ steps.ver.outputs.version }}" \
-            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (https://rasputin.geekdojo.com/rasputin-root-ca.pem) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile rasputin-root-ca.pem\`; verify commands: https://rasputin.geekdojo.com/docs/agents/. Per-asset SHA-256 in \`manifest.json\`. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
+            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (https://rasputin.geekdojo.com/rasputin-root-ca.pem) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile rasputin-root-ca.pem\`; verify commands: https://rasputin.geekdojo.com/docs/agents/. Per-asset SHA-256 in \`manifest.json\`, which is itself signed: \`manifest.json.sig\` is a detached DER CMS signature over it, verified the same way. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
             $PRERELEASE_FLAG \
             release-out/*
 

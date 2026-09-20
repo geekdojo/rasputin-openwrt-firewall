@@ -15,8 +15,6 @@
 #                      survive sysupgrade for the same reason seed.env does —
 #                      /etc/config/rasputin is regenerated, and it no longer
 #                      holds the token.
-#   - trust/root-ca.pem  CI-injected at build, but if the operator ever
-#                      rotates it locally that change should survive too.
 #   - agent-state/     rasputin-agent state (RASPUTIN_AGENT_STATE_DIR,
 #                      set in files/etc/init.d/rasputin-agent). Holds the
 #                      updater's pending/health-check bookkeeping, which
@@ -38,7 +36,33 @@
 # seed.env changes.
 #
 # Discovered during the CWWK x86-p5-n100 sysupgrade test 2026-06-07.
-/etc/rasputin/
+#
+# ⚠️ LISTED FILE BY FILE, NOT AS `/etc/rasputin/`, AND trust/ IS DELIBERATELY
+# ABSENT (geekdojo/geekdojo-brain#531).
+#
+# The trust anchor is the thing that decides which images this box will install.
+# Preserving it made the anchor a property of the OVERLAY rather than of the
+# image: whatever root-ca.pem a box happened to be carrying was copied forward
+# over every sysupgrade, so a reflash — the one action an operator takes to get
+# a box back to a known state — could not replace it. The image's own
+# /etc/rasputin/trust/root-ca.pem, injected by CI from the org variable, is the
+# anchor now, and a reflash is how you change it.
+#
+# That trades away in-place operator rotation of the root. It is deliberate: an
+# anchor you cannot reset is worth less than one you must reflash to move, and
+# rotation belongs to the release pipeline, not to a file that outlives the
+# image it arrived with. /etc/init.d/rasputin-trust-clean removes any overlay
+# copy already fielded (an A/B slot update keeps the whole overlay, so keep.d
+# alone would never reach those boxes), logging loudly when it differed from the
+# image's.
+#
+# Adding state under /etc/rasputin/? Add its path HERE. This list is no longer
+# "the whole directory", so a new file is dropped by sysupgrade unless it is
+# named — which is the cost of being able to leave trust/ out at all.
+/etc/rasputin/seed.env
+/etc/rasputin/join.token
+/etc/rasputin/agent-state/
+/etc/rasputin/hosts/
 
 # Snort3 (IDS):
 #   - /etc/config/snort        operator UCI tuning (changing home_net,
@@ -74,8 +98,9 @@
 #                                 (tailscaled-ca.pem, RASPUTIN_MESH_CA_BUNDLE),
 #                                 written by rasputin-agent on enrollment and
 #                                 trusted by tailscaled via SSL_CERT_FILE.
-#                                 Covered by /etc/rasputin/ above, listed here
-#                                 explicitly for documentation.
+#                                 It is a per-installation CA the control plane
+#                                 minted, not the release trust anchor, so it
+#                                 survives where trust/ does not.
 /etc/tailscale/
 /etc/config/tailscale
 /etc/rasputin/mesh/
