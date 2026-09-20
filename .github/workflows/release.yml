@@ -116,6 +116,20 @@ jobs:
           REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-bus-pin.sh
 
+      # The set-root-hash table tests ci.yml runs on every PR, run again here.
+      # (geekdojo/geekdojo-brain#558)
+      - name: set-root-hash helper tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-set-root-hash.sh
+
+      # The mgmt-harden idempotency tests ci.yml runs on every PR, run again here.
+      # (geekdojo/geekdojo-brain#503, #559)
+      - name: mgmt-harden helper tests
+        timeout-minutes: 5
+        run: sh scripts/test-mgmt-harden.sh
+
       # Same reasoning as the static checks above: run the identical behavioural
       # test a PR faced, at the point a finding is most expensive to discover.
       # The seed scrub blanks a credential during first-boot provisioning, and
