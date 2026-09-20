@@ -65,11 +65,13 @@ cleanup() { [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"; }
 trap cleanup EXIT
 SCRATCH=$(mktemp -d 2>/dev/null || mktemp -d -t setroothash)
 
+_n=0
 run_sut() {
 	_sh=$1; shift
 	_mode=$1; shift          # arg | stdin
 	_val=$1
-	sf="$SCRATCH/shadow.$$.$RANDOM"
+	_n=$((_n + 1))
+	sf="$SCRATCH/shadow.$$.$_n"
 	printf '%s\n' "$STOCK" > "$sf"
 	before=$(cat "$sf")
 
