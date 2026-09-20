@@ -627,6 +627,13 @@ jobs:
     # worse than no gate, because the release notes say it booted.
     if: ${{ success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
+    # The release signing credential lives in this repository's `signing`
+    # ENVIRONMENT, not in repository- or organisation-level secrets
+    # (geekdojo/geekdojo-brain#524). Naming the environment here is what makes
+    # its secrets reachable at all, and what makes its deployment-branch policy
+    # apply: a job that does not name it gets no leaf and fails the preflight
+    # rather than signing with something weaker.
+    environment: signing
     permissions:
       contents: write
     steps:
@@ -670,62 +677,48 @@ jobs:
           merge-multiple: true
           path: artifacts
 
-      - name: Materialise signing material to tmpfs
-        env:
-          LEAF_KEY:  ${{ secrets.RASPUTIN_LEAF_KEY }}
-          LEAF_CERT: ${{ secrets.RASPUTIN_LEAF_CERT }}
-          ROOT_PEM:  ${{ vars.RASPUTIN_ROOT_CA_PEM }}
-        run: |
-          set -eu
-          if [ -z "${LEAF_KEY:-}" ] || [ -z "${LEAF_CERT:-}" ] || [ -z "${ROOT_PEM:-}" ]; then
-            echo "::error::missing one of RASPUTIN_LEAF_KEY / RASPUTIN_LEAF_CERT (repo secrets) or RASPUTIN_ROOT_CA_PEM (org variable)"; exit 1
-          fi
-          sudo mkdir -p /mnt/rasputin-sign
-          sudo mount -t tmpfs -o size=8M,mode=0700,uid=$(id -u),gid=$(id -g) tmpfs /mnt/rasputin-sign
-          umask 077
-          printf '%s' "$LEAF_KEY"  > /mnt/rasputin-sign/leaf.key
-          printf '%s' "$LEAF_CERT" > /mnt/rasputin-sign/leaf-chain.pem
-          printf '%s' "$ROOT_PEM"  > /mnt/rasputin-sign/root-ca.pem
-          # Split leaf-chain into leaf + intermediate (same pattern as
-          # rasputin-os; CMS signing needs them separately).
-          awk -v leaf=/mnt/rasputin-sign/leaf.pem \
-              -v inter=/mnt/rasputin-sign/intermediate.pem \
-              '/-----BEGIN CERTIFICATE-----/{i++} {if(i==1)print > leaf; else if(i==2)print > inter}' \
-              /mnt/rasputin-sign/leaf-chain.pem
-          openssl verify -CAfile /mnt/rasputin-sign/root-ca.pem \
-            -untrusted /mnt/rasputin-sign/intermediate.pem \
-            /mnt/rasputin-sign/leaf.pem \
-            || { echo "::error::leaf cert chain does not verify against root"; exit 1; }
+      # The credential is staged and gated by the organisation's shared action
+      # (geekdojo/geekdojo-brain#524), pinned by SHA.
+      #
+      # What this replaces mattered. The check here was `openssl verify` with
+      # no -purpose, which checks the chain and skips purpose checking
+      # ENTIRELY -- so a leaf that no CMS verifier would accept passed it. That
+      # is exactly how leaf-002 shipped: a perfect chain carrying codeSigning
+      # and the release OID but no emailProtection, which every deployed board
+      # refuses, because OpenSSL's CMS_verify defaults to the S/MIME purpose
+      # and nothing in the field overrides it. rasputin-os caught that in its
+      # own preflight; this repository would have signed with it and published
+      # a firewall image no node could install.
+      - name: Stage and preflight the signing credential
+        id: mat
+        uses: geekdojo/.github/.github/actions/rasputin-sign@e94e742453c1a1d0d3426d1b541bd5f1a82f3c4a
+        with:
+          purpose: release
+          leaf-key:  ${{ secrets.RASPUTIN_LEAF_KEY }}
+          leaf-cert: ${{ secrets.RASPUTIN_LEAF_CERT }}
+          root-ca:   ${{ vars.RASPUTIN_ROOT_CA_PEM }}
 
-          # PURPOSE, not just chain (geekdojo/geekdojo-brain#526).
-          #
-          # Chaining to the root says the leaf is ours. It does not say the leaf
-          # is allowed to sign FIRMWARE. That authorization is carried in the
-          # leaf's extended key usage as 1.3.6.1.4.1.66587.1.1.1, the release
-          # purpose OID, and it is the intermediate's signature over the EKU that
-          # makes it authorization rather than a naming convention: the holder of
-          # a catalog leaf cannot grant themselves the release purpose
-          # (rasputin-control-plane artifactsig/eku.go).
-          #
-          # Everything downstream now enforces the OID — artifactsig on the node,
-          # and the laptop-side shell verifier in bootstrap.sh / flash.sh. A
-          # release signed by a leaf without it would chain, publish, and then be
-          # refused at install and at first flash. Check it at signing time, where
-          # the only cost is a failed run.
-          #
-          # Matched as a WHOLE TOKEN, comma- or line-end delimited: the raw string
-          # is a prefix of any future …1.1.1x OID, so a prefix test would accept a
-          # purpose that has not been minted yet (geekdojo/geekdojo-brain#474).
-          # `x509 -text` rather than `-ext`: -ext does not exist on LibreSSL, and
-          # this check is the same shape the laptop verifier runs.
-          leaf_eku=$(openssl x509 -in /mnt/rasputin-sign/leaf.pem -noout -text \
-            | grep -A1 'X509v3 Extended Key Usage' | tr -d '\r')
-          printf '%s\n' "$leaf_eku" \
-            | grep -Eq '(^|[ ,])1\.3\.6\.1\.4\.1\.66587\.1\.1\.1([ ,]|$)' \
-            || { echo "::error::signing leaf does not carry the release purpose OID 1.3.6.1.4.1.66587.1.1.1. Artifacts it signs would be refused by rasputin-agent and by the first-flash verifier. Got: $leaf_eku"; exit 1; }
-          echo "leaf carries the release purpose OID (1.3.6.1.4.1.66587.1.1.1)"
+      # The inline release-OID check that landed on main here
+      # (geekdojo/geekdojo-brain#526) is not dropped, it MOVED. The shared
+      # action's preflight makes the same demand of the leaf, matched as a
+      # whole token rather than a substring for the same reason (#474), and
+      # alongside it the smimesign purpose every deployed board enforces and
+      # RAUC's codesign semantics -- neither of which this repository was
+      # checking at all. One copy, with its own tests in geekdojo/.github, is
+      # the point of the action.
 
       - name: CMS-sign images + emit manifest.json
+        id: sign
+        env:
+          # Through the environment, not expanded into the script text: a
+          # `${{ }}` inside a run block is substituted before the shell ever
+          # sees it, so its value becomes code rather than data. These
+          # particular values are paths the signing action just wrote, but the
+          # rule is the rule (zizmor template-injection), and a step that
+          # follows it is one nobody has to re-reason about later.
+          LEAF: ${{ steps.mat.outputs.leaf }}
+          INTERMEDIATE: ${{ steps.mat.outputs.intermediate }}
+          KEY: ${{ steps.mat.outputs.key }}
         run: |
           set -eu
           mkdir -p release-out
@@ -745,9 +738,9 @@ jobs:
             f="$1"
             openssl cms -sign -binary \
               -in "release-out/$f" \
-              -signer   /mnt/rasputin-sign/leaf.pem \
-              -certfile /mnt/rasputin-sign/intermediate.pem \
-              -inkey    /mnt/rasputin-sign/leaf.key \
+              -signer   "$LEAF" \
+              -certfile "$INTERMEDIATE" \
+              -inkey    "$KEY" \
               -outform DER \
               -out "release-out/${f}.sig"
           }
@@ -814,22 +807,38 @@ jobs:
           # reading it.
           sign_file manifest.json
 
-          # Prove the published verify command passes BEFORE shipping it. A
-          # signature that does not verify is worse than none: it is published,
-          # it looks like a control, and the first thing it fails is a first
-          # flash by a new operator.
-          openssl cms -verify -binary -inform DER \
-            -in release-out/manifest.json.sig \
-            -content release-out/manifest.json \
-            -CAfile /mnt/rasputin-sign/root-ca.pem -out /dev/null \
-            || { echo "::error::manifest.json.sig does not verify against the root CA"; exit 1; }
+          # The proof that the published verify command passes is one step
+          # below, through the shared action, over EVERY artifact this job
+          # signed rather than the manifest alone -- and with the purpose named
+          # rather than left to OpenSSL's default.
+          # Hand the signed artifacts to that step by name rather than by glob,
+          # so a file that was never produced is a missing artifact there (an
+          # error) instead of one fewer thing quietly checked.
+          {
+            printf 'signed<<EOF_SIGNED\n'
+            printf 'release-out/%s\n' "$disk" "$rootfs" manifest.json
+            printf 'EOF_SIGNED\n'
+          } >> "$GITHUB_OUTPUT"
 
           echo "----- release-out/ -----" && ls -lh release-out/
           echo "----- manifest.json -----" && cat release-out/manifest.json
 
+      # Nothing verified what this job signed before it was published. Both
+      # artifacts are now checked against the trusted root with the purpose the
+      # rasputin-agent applies at install, so a signature the fleet cannot use
+      # fails the release instead of reaching the dev channel.
+      - name: Self-verify the signed artifacts
+        uses: geekdojo/.github/.github/actions/rasputin-sign@e94e742453c1a1d0d3426d1b541bd5f1a82f3c4a
+        with:
+          mode: verify
+          purpose: release
+          artifacts: ${{ steps.sign.outputs.signed }}
+
       - name: Wipe signing material
         if: always()
-        run: sudo umount /mnt/rasputin-sign 2>/dev/null || true
+        uses: geekdojo/.github/.github/actions/rasputin-sign@e94e742453c1a1d0d3426d1b541bd5f1a82f3c4a
+        with:
+          mode: cleanup
 
       - name: Publish GitHub Release
         env:
