@@ -177,9 +177,36 @@ TOKEN_FILE="$ROOT$JOIN_TOKEN_FILE"
 in_chroot() { timeout 60 chroot "$ROOT" "$@"; }
 
 # apply NAME — run apply-seed, keeping its stderr in $WORK/NAME.err; sets $APPLY_RC.
+#
+# RASPUTIN_APPLY_SEED_AGENT points apply-seed at the agent it checks the seed
+# through. It is set to a path that does not exist by default: the image this
+# harness unpacks is a published one, whose agent predates `seed check`, so the
+# ordinary cases take the documented fallback exactly as a fielded box does.
+# agent_stub() puts a real one there for the cases that are about the check.
+APPLY_SEED_AGENT=/usr/lib/rasputin/no-such-agent
 apply() {
 	APPLY_RC=0
-	in_chroot /usr/lib/rasputin/apply-seed > "$WORK/$1.out" 2> "$WORK/$1.err" || APPLY_RC=$?
+	in_chroot /usr/bin/env "RASPUTIN_APPLY_SEED_AGENT=$APPLY_SEED_AGENT" \
+		/usr/lib/rasputin/apply-seed > "$WORK/$1.out" 2> "$WORK/$1.err" || APPLY_RC=$?
+}
+
+# agent_stub BODY — install a fake `rasputin-agent` in the chroot whose
+# `seed check` behaves as BODY says. The real one is a Go binary from another
+# repo; what apply-seed depends on is the contract — exit 0 with a normalized
+# seed on stdout, 1 with the reason on stderr and nothing on stdout, 2 for a
+# build that has never heard of the subcommand — and that is what this drives.
+agent_stub() {
+	APPLY_SEED_AGENT=/usr/lib/rasputin/agent-stub
+	{
+		printf '#!/bin/sh\n'
+		printf 'if [ "$1" != seed ] || [ "$2" != check ]; then\n'
+		printf '  echo "rasputin-agent: unknown command \\"$1\\"" >&2\n'
+		printf '  exit 2\n'
+		printf 'fi\n'
+		printf 'shift 2\n'
+		printf '%s\n' "$1"
+	} > "$ROOT$APPLY_SEED_AGENT"
+	chmod +x "$ROOT$APPLY_SEED_AGENT"
 }
 
 # agent_env — the environment init.d/rasputin-agent hands procd, one VAR=value
@@ -524,6 +551,72 @@ for seedcase in nofile blank sshonly; do
 	fi
 done
 rm -f "$ROOT/etc/dropbear/authorized_keys"
+
+echo "9c. the seed is read through the agent, not sourced as a shell script"
+# geekdojo/geekdojo-brain#540 (F18). Each of the three exit statuses means
+# something different to apply-seed, and each is driven here against the real
+# image's busybox and the real uci.
+
+# 0 — checked. What apply-seed uses is the agent's OUTPUT, not the file on
+# disk: the stub answers with a different node id than the seed carries, and
+# UCI must end up with the stub's.
+reset; rm -f "$TOKEN_FILE"
+agent_stub "cat <<'CHECKED'
+RASPUTIN_NODE_ROLE='firewall'
+RASPUTIN_NODE_ID='fw-from-the-agent'
+RASPUTIN_CLUSTER_ID='example-cluster'
+RASPUTIN_NATS_URL='nats://example-cluster.local:4222'
+RASPUTIN_CP_JOIN_TOKEN='tok-checked'
+CHECKED"
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply seedcheck-ok
+[ "$APPLY_RC" -eq 0 ] && ok "seed check: apply-seed exits 0" \
+	|| { bad "seed check: exit $APPLY_RC"; sed 's/^/      /' "$WORK/seedcheck-ok.err" >&2; }
+[ "$(uci_get rasputin.main.node_id)" = fw-from-the-agent ] \
+	&& ok "seed check: the normalized copy is what was applied" \
+	|| bad "seed check: node_id is '$(uci_get rasputin.main.node_id)', want the agent's"
+[ ! -e "$ROOT/tmp/rasputin-seed.checked" ] && ok "seed check: the normalized copy does not outlive the read" \
+	|| bad "seed check: /tmp/rasputin-seed.checked was left behind (it holds the join token)"
+
+# 1 — the agent refuses. NOTHING is applied and apply-seed exits 1, the same
+# shape a bad node id or a bad pin already takes.
+reset; rm -f "$TOKEN_FILE"
+agent_stub "echo 'SEED UNUSABLE: RASPUTIN_NODE_ROLE is \"compute\" but this image can only be a \"firewall\"' >&2; exit 1"
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply seedcheck-refused
+[ "$APPLY_RC" -ne 0 ] && ok "seed refused: apply-seed exits non-zero" \
+	|| bad "seed refused: apply-seed exited 0"
+grep -q 'SEED UNUSABLE' "$WORK/seedcheck-refused.err" && ok "seed refused: relays the agent's reason" \
+	|| { bad "seed refused: the reason did not reach stderr"; sed 's/^/      /' "$WORK/seedcheck-refused.err" >&2; }
+[ ! -e "$UCI" ] && ok "seed refused: nothing written to /etc/config/rasputin" \
+	|| { bad "seed refused: /etc/config/rasputin written:"; sed 's/^/      /' "$UCI" >&2; }
+
+# 2 — an agent that predates the subcommand. MIXED FLEETS: this image pins its
+# agent and that pin lags on purpose, so a box WILL exist whose agent has never
+# heard of `seed check`. It must still provision, from the seed as before.
+reset; rm -f "$TOKEN_FILE"
+agent_stub "echo unreachable"
+printf '#!/bin/sh\necho "rasputin-agent: unknown command \\"$1\\"" >&2\nexit 2\n' > "$ROOT$APPLY_SEED_AGENT"
+chmod +x "$ROOT$APPLY_SEED_AGENT"
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply seedcheck-old
+[ "$APPLY_RC" -eq 0 ] && ok "old agent: apply-seed still provisions" \
+	|| { bad "old agent: exit $APPLY_RC"; sed 's/^/      /' "$WORK/seedcheck-old.err" >&2; }
+[ "$(uci_get rasputin.main.node_id)" = fw-test-1 ] \
+	&& ok "old agent: the seed's own values are applied" \
+	|| bad "old agent: node_id is '$(uci_get rasputin.main.node_id)'"
+
+# And with no agent on the box at all — the default every other case here
+# runs under, stated once so it is a claim rather than a side effect.
+reset; rm -f "$TOKEN_FILE"
+APPLY_SEED_AGENT=/usr/lib/rasputin/no-such-agent
+{ base_seed; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply seedcheck-none
+[ "$APPLY_RC" -eq 0 ] && ok "no agent: apply-seed still provisions" \
+	|| { bad "no agent: exit $APPLY_RC"; sed 's/^/      /' "$WORK/seedcheck-none.err" >&2; }
+[ "$(uci_get rasputin.main.node_id)" = fw-test-1 ] \
+	&& ok "no agent: the seed's own values are applied" \
+	|| bad "no agent: node_id is '$(uci_get rasputin.main.node_id)'"
 
 echo "9b. key-only SSH is re-asserted with NO authorized key on the box"
 # THE case the old gate skipped (geekdojo/geekdojo-brain#545). apply-seed used
