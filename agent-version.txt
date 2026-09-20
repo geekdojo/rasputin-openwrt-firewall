@@ -645,5 +645,21 @@
 #   sha256 pinned (2026-09-19): the existing dev.171 pin gains the tarball's
 #                        sha256, taken from the release's published .hash asset.
 #                        No agent change (geekdojo/geekdojo-brain#533).
-2026.09.4-dev.171
-sha256  f30deeb9833d233d12852532e1439101ab0bf045c54bd08f3fe7026b51061f42  rasputin-agent-2026.09.4-dev.171-linux-amd64.tar.gz
+#   2026.09.4-dev.172 (2026-09-20): DEV pin -- moves the firewall onto the first CP
+#                        release whose agent actually CONTAINS `rasputin-agent seed
+#                        check`, which this image's apply-seed now calls. Built from
+#                        CP 9ef4f68.
+#                        AGENT CHANGE, and the whole reason for this bump: #71 (merged
+#                        2026-09-20) had apply-seed read the seed through
+#                        `rasputin-agent seed check --role firewall`. That subcommand
+#                        first landed in CP ad519c34 (2026-09-20 03:41 UTC), whereas
+#                        dev.171 was published 2026-09-19 18:51 UTC and therefore does
+#                        not carry it. On dev.171 apply-seed takes the documented
+#                        `exit 2` "this image's agent predates it" fallback and
+#                        provisions the old way -- a bench run would pass while
+#                        exercising none of the new path. v2026.09.4-dev.171..9ef4f68
+#                        adds agent/cmd/rasputin-agent/seedcheck.go and proto/seed.go,
+#                        so the checked path is the one that runs
+#                        (geekdojo/geekdojo-brain#540).
+2026.09.4-dev.172
+sha256  d926df0fa2618462dd0375761809d6c1e74109e67b8ca88697045cf8196fcb55  rasputin-agent-2026.09.4-dev.172-linux-amd64.tar.gz
