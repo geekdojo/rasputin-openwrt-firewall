@@ -661,5 +661,36 @@
 #                        adds agent/cmd/rasputin-agent/seedcheck.go and proto/seed.go,
 #                        so the checked path is the one that runs
 #                        (geekdojo/geekdojo-brain#540).
-2026.09.4-dev.172
-sha256  d926df0fa2618462dd0375761809d6c1e74109e67b8ca88697045cf8196fcb55  rasputin-agent-2026.09.4-dev.172-linux-amd64.tar.gz
+#   2026.09.4-dev.175 (2026-09-22): DEV pin -- the fix for this image's own worst
+#                        failure mode, reaching hardware. Built from CP 424286c
+#                        (control-plane #390, merged 2026-09-22 04:15 UTC;
+#                        release published 04:35 UTC).
+#                        AGENT CHANGE, and the whole reason for this bump: the
+#                        agent's bus options now set nats.SkipHostLookup().
+#                        Without it nats.go resolves the cluster name through the
+#                        OS resolver BEFORE the agent's custom dialer runs, so the
+#                        dialer only ever receives an IP literal, its ".local"
+#                        guard never matches, and the mDNS re-resolve never
+#                        happens. On the firewall the OS resolver is dnsmasq
+#                        answering from the addnhosts file the agent's own
+#                        hostsync wrote, so the lookup does not FAIL -- it
+#                        succeeds with the stale address, and once the control
+#                        plane's DHCP lease moves the agent dials a dead address
+#                        forever. Measured on the bench: cp-firewall1 off the bus
+#                        for 22 hours, ~31 dial attempts all to the stale address,
+#                        no recovery and no alert naming the cause. Write-up:
+#                        geekdojo/geekdojo-brain#547.
+#                        EXPOSURE: the regression landed in CP 5d53959
+#                        (control-plane #374), and dev.172 -- the pin this
+#                        replaces -- is the FIRST agent build that carries it, so
+#                        every firewall image from dev.172 through dev.174 is
+#                        exposed. This bump is the fix reaching hardware.
+#                        Rebuild payload on top: the ImageBuilder feed refresh.
+#                        Canary #73 (2026-09-21) reports the LuCI package set
+#                        moving 26.258.31327~5dbade4 -> 26.263.44884~0834d09
+#                        against the 2026.09.3 baseline; OpenWrt base unchanged
+#                        and current (25.12.5); Snort community rules current at
+#                        ae74ed6d (upstream Last-Modified 2026-09-17 13:03 UTC,
+#                        unchanged).
+2026.09.4-dev.175
+sha256  f734b83612cf6fb0c7b9186f756e6389c843ed0435e6b7c8a8f0ecd58eb75f95  rasputin-agent-2026.09.4-dev.175-linux-amd64.tar.gz
