@@ -692,5 +692,25 @@
 #                        and current (25.12.5); Snort community rules current at
 #                        ae74ed6d (upstream Last-Modified 2026-09-17 13:03 UTC,
 #                        unchanged).
-2026.09.4-dev.175
-sha256  f734b83612cf6fb0c7b9186f756e6389c843ed0435e6b7c8a8f0ecd58eb75f95  rasputin-agent-2026.09.4-dev.175-linux-amd64.tar.gz
+#   2026.09.4-dev.178 (2026-09-26): DEV pin -- the pre-stable build that gets
+#                        benched, lockstep with the rasputin-os pin to the same
+#                        CP release. Built from CP 6c152f9 (control-plane #396,
+#                        merged 2026-09-26 17:17 UTC; release published after
+#                        main CI went fully green on that commit, codeql
+#                        included).
+#                        No functional agent change: the only agent-side diff
+#                        since dev.175 is control-plane #387's quality sweep
+#                        (agent/internal/quiesce drops a local short() for
+#                        proto.ShortFingerprint, same output). The rest of
+#                        dev.176..dev.178 is api/UI work the firewall does not
+#                        run.
+#                        Rebuild payload: the Snort community rules re-pin in
+#                        this same change (ae74ed6d -> 087cb5f7, upstream
+#                        Last-Modified 2026-09-24 11:44 UTC) plus the
+#                        ImageBuilder feed refresh. Canary #73 (2026-09-21)
+#                        reports the LuCI package set moving 26.258.31327~5dbade4
+#                        -> 26.263.44884~0834d09 against the 2026.09.3 baseline
+#                        (already shipped in dev.128); OpenWrt base unchanged and
+#                        current (25.12.5).
+2026.09.4-dev.178
+sha256  698b2b6fc9d3097c4c6bfad13eca9e159811b2e788b5ec75d7badaf6f3bddedc  rasputin-agent-2026.09.4-dev.178-linux-amd64.tar.gz
