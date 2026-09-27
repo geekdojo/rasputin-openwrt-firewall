@@ -743,5 +743,29 @@
 #                        This release is also the one rasputin-os 2026.09.4 bakes as
 #                        its offline firewall descriptor (firewall-pin.txt matches
 #                        the OS version -- Bryce, 2026-09-27).
-2026.09.4
-sha256  075fc1e122c75e8dcf189e9f1d5cdf09af72d90cd4ed7b6b22c83df4297de7ca  rasputin-agent-2026.09.4-linux-amd64.tar.gz
+#   2026.09.5-dev.181 (2026-09-27): DEV pin -- the first on the 2026.09.5 line,
+#                        moving off the 2026.09.4 stable. Built from CP a62548f
+#                        (control-plane #401 on top of #400; release published
+#                        after main CI went fully green on that commit, codeql
+#                        included).
+#                        AGENT CHANGE, from control-plane #400
+#                        (geekdojo/geekdojo-brain#491, gate 4 fail-closed
+#                        resolvers):
+#                        - R13 ResolvePin (agent/internal/bus): a bus pin file
+#                          that exists but is EMPTY was read as "never pinned",
+#                          so the node dialled plaintext and sent its join token
+#                          (#510 F09). It is now a configured source with a
+#                          fault, and the agent refuses to dial. This is on the
+#                          bus-dial path every agent runs, this image's included.
+#                        - R21 pinnedIP (agent/internal/clusterdns): only a bare
+#                          address in the resolved drop-in's DNS= line counts as
+#                          a pin; anything else withdraws the drop-in unprobed.
+#                        The rest of the agent diff is comment-only (LOCKED
+#                        markers retired). Control-plane #401 (#527, forwarding
+#                        the firewall's signed manifest to flash.sh) is api-side.
+#                        Rebuild payload on top: this repo's #79 (#531 trust/
+#                        cleanup) and the ImageBuilder feed refresh. Snort
+#                        community rules unchanged at 087cb5f7 (upstream
+#                        Last-Modified 2026-09-24 11:44 UTC, still current).
+2026.09.5-dev.181
+sha256  30c197291e30c6b2f116b7f04f8a59f0c4a9123d75fe735358fd2d4c0c0e7d3f  rasputin-agent-2026.09.5-dev.181-linux-amd64.tar.gz
