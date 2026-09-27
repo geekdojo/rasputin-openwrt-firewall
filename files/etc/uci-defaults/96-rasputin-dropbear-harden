@@ -44,3 +44,5 @@ fi
 logger -t rasputin "dropbear hardened: key-only SSH (password auth disabled; supply a key via seed.env RASPUTIN_SSH_AUTHORIZED_KEY)"
 
 exit 0
+
+if then
