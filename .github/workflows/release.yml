@@ -141,6 +141,17 @@ jobs:
           REQUIRE_BUSYBOX: "1"
         run: sh scripts/test-trust-clean.sh
 
+      # The same script against a REAL mounted overlayfs and the real kernel
+      # log (geekdojo/geekdojo-brain#531, bench 2026-09-27). The plain-directory
+      # tests above passed while the box kept serving the stale anchor for the
+      # rest of the boot (a dentry cached by S00sysfixtime survived the unlink
+      # beneath the mount) and logged nothing (logger at S10, before logd).
+      # Needs root for mount, /dev/kmsg, dmesg and drop_caches; REQUIRE_OVERLAY
+      # turns a skip into a failure so this runner cannot silently not run it.
+      - name: trust-clean overlay functional test
+        timeout-minutes: 5
+        run: sudo env REQUIRE_OVERLAY=1 REQUIRE_BUSYBOX=1 sh scripts/test-trust-clean-overlay.sh
+
       # The vendored agent's hash pin (geekdojo/geekdojo-brain#533). Runs before
       # the build job downloads the tarball, so a pin whose two lines disagree
       # stops the release here rather than after ImageBuilder.
