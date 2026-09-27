@@ -29,13 +29,46 @@
 #   the image's file (/rom/etc/rasputin/trust/root-ca.pem) shows through. If the
 #   two differed, say so loudly with both fingerprints first — that is an
 #   operator-placed or rotated anchor being dropped, and it must not vanish in
-#   silence. If they were identical, it is bookkeeping and logs at info.
+#   silence. If they were identical nothing observable changes, so nothing is
+#   logged.
 #
 #   Idempotent: after the first boot there is nothing on the overlay and this
-#   does nothing. It never touches /rom, never writes an anchor, and never runs
-#   when the image ships no anchor of its own — removing the overlay copy would
+#   does nothing. It never touches /rom, never writes an anchor of its own, and
+#   never runs when the image ships no anchor — removing the overlay copy would
 #   then leave the box with NO trust root, which is a worse state than a stale
 #   one and is not this script's decision to make.
+#
+# THE RUNNING SYSTEM MUST SEE THE CHANGE, THIS BOOT (bench, dev.130, 2026-09-27)
+#   The overlay is already mounted when this runs, and OpenWrt's S00sysfixtime
+#   has already walked every file under /etc THROUGH it (`find /etc -type f`
+#   plus a stat of each). So the kernel holds an overlay dentry for the anchor
+#   that points at the upper-layer inode. Unlinking the file in /overlay/upper,
+#   underneath the mount, does not touch that dentry: the first version of this
+#   script removed the file and the box went on serving the deleted inode's
+#   stale bytes to every reader until the cache happened to be evicted — i.e.
+#   the image's anchor only took effect on the NEXT boot.
+#
+#   Removing it through the mount instead is not an option: overlayfs answers an
+#   unlink of a file that also exists in the lower layer with a WHITEOUT, which
+#   would hide the image's copy too and leave no anchor at all. And overlayfs
+#   has no remount that re-resolves its layers. So: unlink in the upper layer,
+#   then drop the dentry/inode cache (drop_caches=2, not page cache) so the next
+#   lookup resolves afresh and finds /rom's file, then CHECK what the mount now
+#   serves. If it is still not the image's (a reader holding the old file open
+#   pins its dentry), write the image's bytes through the mount, so what is
+#   served is the image's anchor regardless, and log that it happened.
+#
+# WHERE THE LOG GOES
+#   Into the kernel ring buffer via /dev/kmsg, not `logger`. This runs at S10;
+#   logd starts at S12, and until it does there is no /dev/log, so the first
+#   version's `logger` lines were silently lost. Moving the script after logd
+#   was the other option, and was rejected: procd starts logd asynchronously,
+#   so "after S12" is still a race with /dev/log appearing, and it would push
+#   the anchor fix later in boot for the sake of a log line. The ring buffer
+#   is how OpenWrt itself logs before logd (procd's early messages), it is
+#   readable with `dmesg` immediately, and logd imports it from /proc/kmsg when
+#   it starts, so the line also appears in `logread`. Falls back to `logger`
+#   only when there is no /dev/kmsg to write (a manual run off-box).
 #
 # START=10: before rasputin-agent (90), which reads the anchor at startup, and
 # before anything that could act on an update. Nothing it depends on runs later
@@ -44,16 +77,29 @@ START=10
 
 OVERLAY_ROOT=${RASPUTIN_TRUST_OVERLAY_ROOT:-/overlay/upper}
 ROM_ROOT=${RASPUTIN_TRUST_ROM_ROOT:-/rom}
+MERGED_ROOT=${RASPUTIN_TRUST_MERGED_ROOT:-}
+KMSG=${RASPUTIN_TRUST_KMSG:-/dev/kmsg}
+DROP_CACHES=${RASPUTIN_TRUST_DROP_CACHES:-/proc/sys/vm/drop_caches}
 TRUST_REL=etc/rasputin/trust/root-ca.pem
 
-log() { logger -t rasputin-trust-clean "$@"; echo "rasputin-trust-clean: $*"; }
+# log <priority> <message>, priority 3 (err) or 4 (warning). The kernel log
+# when it can be written (see WHERE THE LOG GOES), logger otherwise.
+log() {
+	_prio=$1; shift
+	echo "rasputin-trust-clean: $*"
+	if [ -w "$KMSG" ] && printf '<%s>rasputin-trust-clean: %s\n' "$_prio" "$*" >> "$KMSG"; then
+		return 0
+	fi
+	case $_prio in 3) _level=err ;; *) _level=warning ;; esac
+	logger -p "user.$_level" -t rasputin-trust-clean "$*"
+}
 
 # Fingerprint a PEM, or print "unreadable". Only ever used for the log line, so
 # a box without openssl still cleans up — it just reports sizes instead.
 fingerprint() {
 	if command -v openssl >/dev/null 2>&1; then
 		openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null \
-			| sed 's/^.*=//' || echo unreadable
+			| sed 's/^.*=//' | grep . || echo unreadable
 	else
 		echo "$(wc -c < "$1" 2>/dev/null || echo 0) bytes (no openssl to fingerprint)"
 	fi
@@ -62,35 +108,48 @@ fingerprint() {
 start() {
 	overlay_copy="$OVERLAY_ROOT/$TRUST_REL"
 	rom_copy="$ROM_ROOT/$TRUST_REL"
+	served_copy="$MERGED_ROOT/$TRUST_REL"
 
 	# Not an overlay layout (a plain rootfs, or a test rig): nothing to reconcile.
 	if [ ! -d "$OVERLAY_ROOT" ] || [ ! -d "$ROM_ROOT" ]; then
 		return 0
 	fi
 
-	[ -e "$overlay_copy" ] || return 0
+	# -e is false for a dangling symlink; -L catches that too.
+	[ -e "$overlay_copy" ] || [ -L "$overlay_copy" ] || return 0
 
 	if [ ! -s "$rom_copy" ]; then
 		# The image carries no anchor of its own (the build warns when the org
 		# variable is empty). Dropping the overlay's copy would leave the box
 		# with nothing to verify against, so keep it and say why.
-		log "WARNING: overlay holds $TRUST_REL but this image ships no trust anchor at $rom_copy — KEEPING the overlay copy. This image cannot verify signed artifacts on its own; rebuild it with RASPUTIN_ROOT_CA_PEM set."
+		log 4 "WARNING: overlay holds $TRUST_REL but this image ships no trust anchor at $rom_copy — KEEPING the overlay copy. This image cannot verify signed artifacts on its own; rebuild it with RASPUTIN_ROOT_CA_PEM set."
 		return 0
 	fi
 
-	if cmp -s "$overlay_copy" "$rom_copy"; then
-		log "removing redundant overlay copy of $TRUST_REL (identical to the image's)"
-	else
-		log "WARNING: removing an overlay copy of $TRUST_REL that DIFFERS from this image's. The image's anchor is now in force. removed=$(fingerprint "$overlay_copy") image=$(fingerprint "$rom_copy")"
+	if ! cmp -s "$overlay_copy" "$rom_copy"; then
+		log 4 "WARNING: removing an overlay copy of $TRUST_REL that DIFFERS from this image's. The image's anchor is now in force. removed=$(fingerprint "$overlay_copy") image=$(fingerprint "$rom_copy")"
 	fi
 
-	if rm -f "$overlay_copy"; then
-		# The parent dirs are in the image, so an emptied overlay dir is
-		# harmless; remove it anyway when it is empty, to leave no trace that
-		# reads like state.
-		rmdir "$(dirname "$overlay_copy")" 2>/dev/null
-		log "overlay copy removed; the anchor now comes from the image"
-	else
-		log "ERROR: could not remove $overlay_copy — this box is still using an anchor from its overlay, not from this image"
+	if ! rm -f "$overlay_copy"; then
+		log 3 "ERROR: could not remove $overlay_copy — this box is still using an anchor from its overlay, not from this image"
+		return 1
+	fi
+	# The parent dirs are in the image, so an emptied overlay dir is harmless;
+	# remove it anyway when it is empty. That also matters: an overlay dir
+	# recreated through the mount is OPAQUE and hides the image's trust/
+	# entirely, so leaving it would leave no anchor at all.
+	rmdir "$(dirname "$overlay_copy")" 2>/dev/null
+
+	# The unlink above was beneath the mounted overlay; make the mount forget
+	# the dentries that still point at the removed file (see header).
+	echo 2 > "$DROP_CACHES" 2>/dev/null
+
+	if ! cmp -s "$served_copy" "$rom_copy"; then
+		if cat "$rom_copy" > "$served_copy" 2>/dev/null && cmp -s "$served_copy" "$rom_copy"; then
+			log 4 "WARNING: /$TRUST_REL was still served from the removed overlay copy after the cache drop (a reader holds it open?); the image's bytes were written through the mount so they are what is read now"
+		else
+			log 3 "ERROR: /$TRUST_REL is not serving this image's anchor after the overlay copy was removed; a reboot will pick up the image's copy"
+			return 1
+		fi
 	fi
 }
