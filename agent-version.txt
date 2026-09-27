@@ -767,5 +767,29 @@
 #                        cleanup) and the ImageBuilder feed refresh. Snort
 #                        community rules unchanged at 087cb5f7 (upstream
 #                        Last-Modified 2026-09-24 11:44 UTC, still current).
-2026.09.5-dev.181
-sha256  30c197291e30c6b2f116b7f04f8a59f0c4a9123d75fe735358fd2d4c0c0e7d3f  rasputin-agent-2026.09.5-dev.181-linux-amd64.tar.gz
+#   2026.09.5-dev.182 (2026-09-27): DEV pin -- the second 2026.09.5 dev chain.
+#                        Built from CP a4891e5 (control-plane #403-#407;
+#                        release published after main CI went fully green on
+#                        that commit, codeql included).
+#                        AGENT CHANGE on this image, from control-plane #404
+#                        (geekdojo/geekdojo-brain#616): the agent has ONE
+#                        reboot function. OpenWrtABBackend.Reboot and MarkBad
+#                        now call it instead of their own exec of `reboot`,
+#                        and the system.reboot handler (the UI's REBOOT
+#                        button) now really reboots -- before, it always ran a
+#                        simulator and the job recorded success. It execs the
+#                        `reboot` compat command, chosen because this busybox
+#                        image has no systemctl; simulation is refused on a
+#                        released image. node.reboot now verifies by the
+#                        node's boot identity.
+#                        Also in the agent: #405's bmc driver changes
+#                        (geekdojo/geekdojo-brain#617, the bitscope reset
+#                        verified by the target's boot identity), which run
+#                        where a node hosts a BMC. #403 (#615, bus pin
+#                        re-offered on a heartbeat) is api-side; the agent is
+#                        unchanged by it. #406 is UI, #407 tests.
+#                        Rebuild payload on top: the ImageBuilder feed refresh.
+#                        Snort community rules unchanged at 087cb5f7 (upstream
+#                        Last-Modified 2026-09-24 11:44 UTC, still current).
+2026.09.5-dev.182
+sha256  2c733acb7299280ef9f76e90b459bce4ebd47890da83ea29db90e0f9ed67c8f5  rasputin-agent-2026.09.5-dev.182-linux-amd64.tar.gz
