@@ -816,5 +816,24 @@
 #                        Rebuild payload on top: the ImageBuilder feed refresh.
 #                        Snort community rules unchanged at 087cb5f7 (upstream
 #                        Last-Modified 2026-09-24 11:44 UTC, still current).
-2026.09.5-dev.183
-sha256  72a50b0f7192b6d6df2f3ca7d424f16156ef2997c5c08356b54bfba73b9f9c3c  rasputin-agent-2026.09.5-dev.183-linux-amd64.tar.gz
+#   2026.09.5 (2026-09-28): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-pinned from the dev.183 prerelease to the CP STABLE
+#                        v2026.09.5, tagged on the same commit (CP 8574729) that
+#                        published dev.183, so the agent binary's code is identical.
+#                        No functional agent change against dev.183.
+#                        The dev chain this promotes is firewall 2026.09.5-dev.136
+#                        (agent dev.183). Against the 2026.09.4 stable the agent
+#                        carries control-plane #400 (fail-closed resolvers,
+#                        geekdojo/geekdojo-brain#491), #404 + #408 (one reboot
+#                        function, decided on facts; #616) and #405 (#617).
+#                        Rebuild payload: this repo's #79 (#531 trust/ cleanup)
+#                        and the ImageBuilder feed refresh. Canary #73
+#                        (2026-09-21) is still the latest report: OpenWrt base
+#                        unchanged and current (25.12.5). Snort community rules at
+#                        087cb5f7; the 2026-09-28 pre-flight's freshness gate
+#                        passed on it.
+#                        This release is the one rasputin-os 2026.09.5 bakes as its
+#                        offline firewall descriptor (stable only ever bakes
+#                        stable -- Bryce, 2026-09-27).
+2026.09.5
+sha256  b5073fc36b6b1e8cede4f59f27c44839cc127b9834ab0fadecb9ee4f3789cdc1  rasputin-agent-2026.09.5-linux-amd64.tar.gz
