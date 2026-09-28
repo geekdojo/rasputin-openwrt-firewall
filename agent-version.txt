@@ -791,5 +791,30 @@
 #                        Rebuild payload on top: the ImageBuilder feed refresh.
 #                        Snort community rules unchanged at 087cb5f7 (upstream
 #                        Last-Modified 2026-09-24 11:44 UTC, still current).
-2026.09.5-dev.182
-sha256  2c733acb7299280ef9f76e90b459bce4ebd47890da83ea29db90e0f9ed67c8f5  rasputin-agent-2026.09.5-dev.182-linux-amd64.tar.gz
+#   2026.09.5-dev.183 (2026-09-27): DEV pin -- the third 2026.09.5 dev chain.
+#                        Built from CP 8574729 (control-plane #408,
+#                        geekdojo/geekdojo-brain#616; release published after
+#                        main CI went fully green on that commit, codeql
+#                        included).
+#                        AGENT CHANGE on THIS image's reboot path: #408 changes
+#                        how the one reboot function reads its `reboot` child
+#                        ending with an error. On the bench a compute node's
+#                        systemd killed the child during the very shutdown it
+#                        started, and the agent reported a failed reboot. Now:
+#                        a shutdown under way (systemd `stopping`, or the
+#                        agent's own signal context cancelled) reports
+#                        nothing; a failure is reported as `definitive` only
+#                        when it is known. ON OPENWRT there is no systemd to
+#                        ask, so a child killed by a signal claims nothing and
+#                        heartbeats stay muted (busybox `reboot` signals procd
+#                        and exits at once, so this is not expected here); a
+#                        command that cannot start or exits non-zero is still
+#                        a definitive failure. node.reboot is now decided on
+#                        facts (a new boot identity, a definitive failure, or
+#                        the node reaching the critical presence tier) rather
+#                        than on a non-definitive report.
+#                        Rebuild payload on top: the ImageBuilder feed refresh.
+#                        Snort community rules unchanged at 087cb5f7 (upstream
+#                        Last-Modified 2026-09-24 11:44 UTC, still current).
+2026.09.5-dev.183
+sha256  72a50b0f7192b6d6df2f3ca7d424f16156ef2997c5c08356b54bfba73b9f9c3c  rasputin-agent-2026.09.5-dev.183-linux-amd64.tar.gz
