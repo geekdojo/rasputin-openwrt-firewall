@@ -835,5 +835,41 @@
 #                        This release is the one rasputin-os 2026.09.5 bakes as its
 #                        offline firewall descriptor (stable only ever bakes
 #                        stable -- Bryce, 2026-09-27).
-2026.09.5
-sha256  b5073fc36b6b1e8cede4f59f27c44839cc127b9834ab0fadecb9ee4f3789cdc1  rasputin-agent-2026.09.5-linux-amd64.tar.gz
+#   2026.09.6-dev.185 (2026-09-30): DEV pin -- the first 2026.09.6 dev chain.
+#                        Built from CP a7006af (control-plane #418; release
+#                        published after main CI went fully green on that
+#                        commit, codeql included). Against the 2026.09.5 stable
+#                        the agent carries three changes that reach THIS image:
+#                        - #415 (geekdojo/geekdojo-brain#517): the bus accepts
+#                          only TLS. The bus.pin verb and the plaintext ladder
+#                          are gone, and the agent needs a pin: from
+#                          RASPUTIN_BUS_PIN (UCI rasputin.main.bus_pin, from the
+#                          seed) or the pin file an earlier agent saved
+#                          (/etc/rasputin/agent-state/bus/pin, kept by keep.d).
+#                          With neither it does not dial; it logs one FATAL
+#                          entry and exits, and procd's respawn limit stops it
+#                          after ten fast exits. The README's seed section is
+#                          corrected in this change (it said a pinless agent
+#                          dials in plaintext). Floor release: 2026.09.5.
+#                        - #417 (geekdojo/geekdojo-brain#590): the openwrt-ab
+#                          OS update download (.rootfs and .sig), the backup
+#                          transfer and the restore fetch trust exactly the
+#                          node's mesh CA bundle; the system pool is gone. A
+#                          box with no usable mesh CA bundle now refuses those
+#                          downloads with a named error. Its bench run on the
+#                          firewall is still owed and needs two consecutive
+#                          builds that both contain it; this is the first.
+#                        - #418 (geekdojo/geekdojo-brain#591): the backend
+#                          selectors (UCI and update among them) read through
+#                          named fail-closed resolvers; an empty value runs the
+#                          autodetect probe and mock is never inferred.
+#                        #419 is UI-only; #412-#414 are docs.
+#                        Rebuild payload on top: the ImageBuilder feed refresh
+#                        (canary #85, 2026-09-28: libopenssl3 3.5.7 -> 3.5.8,
+#                        ca-bundle 20260601 -> 20260816, LuCI 26.268 -> 26.270;
+#                        OpenWrt base unchanged and current at 25.12.5) and the
+#                        Snort community rules re-pinned 087cb5f7 -> 9a13c666
+#                        in this change (Talos republish, upstream
+#                        Last-Modified 2026-09-29 12:16 UTC).
+2026.09.6-dev.185
+sha256  d59da01ae679c22d674c1e678341c0dce40a11bb26d063636b2e3d1a4afe6d82  rasputin-agent-2026.09.6-dev.185-linux-amd64.tar.gz
