@@ -187,8 +187,11 @@ script moves it into the file on its next start.
 controlplane key it names. It is public, the controlplane puts it in every
 seed it makes, and it must be copied exactly (`sha256/` plus 44 characters of
 base64 ending in `=`): a malformed pin makes `apply-seed` stop and apply
-nothing, with the reason in `logread`. Without a pin the agent dials in
-plaintext until the controlplane delivers one. `RASPUTIN_BUS_KEY` (the bus
+nothing, with the reason in `logread`. The bus accepts only TLS, so a seed
+with no pin line leaves the agent on the pin file an earlier agent saved
+(`/etc/rasputin/agent-state/bus/pin`); with no pin anywhere the agent refuses
+to dial, logs one FATAL entry naming each source and the fix, and exits, and
+the box cannot join. `RASPUTIN_BUS_KEY` (the bus
 *private* key) belongs only in the controlplane's own seed; a firewall ignores
 it, logs a warning and blanks it. The full contract is
 [`docs/bus-tls-contract.md`](https://github.com/geekdojo/rasputin-control-plane/blob/main/docs/bus-tls-contract.md)
