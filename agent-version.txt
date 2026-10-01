@@ -888,5 +888,22 @@
 #                        is still the latest report); the Snort rules pin
 #                        9a13c666 is current (upstream Last-Modified still
 #                        2026-09-29 12:16 UTC).
-2026.09.6-dev.186
-sha256  19f7ba4e23a007a6d02fd17e867125c6d361f845e1489b6567be43dcbbad6c7a  rasputin-agent-2026.09.6-dev.186-linux-amd64.tar.gz
+#   2026.09.6-dev.187 (2026-10-01): DEV pin -- the third 2026.09.6 dev chain.
+#                        Built from CP 44c86d2 (control-plane #425,
+#                        geekdojo/geekdojo-brain#623; release published after
+#                        main CI went fully green on that commit, codeql
+#                        included). No functional agent change: #425 touches
+#                        only the api (it admits agents to the bus only after
+#                        the api's subscribers for agent-published subjects
+#                        exist, so a registration sent on joining is not
+#                        dropped), and agent/ and proto/ are unchanged since
+#                        dev.186; #421, #422 and #424 are docs. The bump keeps
+#                        this image's agent in lockstep with the agent/api the
+#                        paired OS dev image vendors. Rebuild payload: whatever
+#                        the ImageBuilder feed moved since dev.141 (canary #85
+#                        is still the latest report) and the Snort community
+#                        rules re-pinned 9a13c666 -> 94d7859a in this change
+#                        (Talos republish, upstream Last-Modified 2026-10-01
+#                        11:32 UTC).
+2026.09.6-dev.187
+sha256  5a7db2bd922ff446eaece0ce16810e7c3427cf849983f4a5ceeb7dbc5c78bac1  rasputin-agent-2026.09.6-dev.187-linux-amd64.tar.gz
