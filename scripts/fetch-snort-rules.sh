@@ -180,7 +180,16 @@ TARBALL_NAME="snort3-community-rules.tar.gz"
 # 36580494086 had already verified it (two downloads, five-member layout,
 # 4017 active rules, snort-mgr -v check under Snort 3.10.0.0 in firewall
 # 2026.09.5) and published sha256-9a13c66608de....
-PINNED_SHA="9a13c66608deff91d675c54a70388f783c9a3f2902fc66a52baa8f018f52b84f"
+# -> 94d7859a46c6... (2026-10-01, 4017 active rules; a Talos republish). It
+# went live on snort.org at 2026-10-01 11:32 UTC (the S3 object's
+# Last-Modified); its gzip header reads 2026-09-30 19:44 UTC, the archive
+# build time. Found while preparing the 2026.09.6-dev.187 agent pin, before
+# any build failed on it. Two separate HTTPS downloads hashed identical, and
+# the mirror's copy hashed the same; the mirror's rasputin-refresh.yml run
+# 36877514193 had already verified it (two downloads, five-member layout,
+# 4017 active rules, snort-mgr -v check under Snort 3.10.0.0 in firewall
+# 2026.09.5) and published sha256-94d7859a46c6....
+PINNED_SHA="94d7859a46c631e6b7b082b1520e3c96332f3494456e0c6cc6430c74bde7f2cd"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
