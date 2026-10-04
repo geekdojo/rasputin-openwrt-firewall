@@ -74,7 +74,7 @@ start_service() {
 			logger -t rasputin-agent "moved the join token out of /etc/config/rasputin into $join_token_file (0600)"
 		else
 			rm -f "$jt_tmp" 2>/dev/null
-			logger -t rasputin-agent "WARNING: could not write the join token to $join_token_file; leaving it in /etc/config/rasputin and retrying next start"
+			logger -t rasputin-agent "WARNING: could not write the join token to $join_token_file; it stays in /etc/config/rasputin and the move is retried on the next start. Until then the agent has no token and the bus refuses this node. Fix $join_token_file."
 		fi
 	fi
 
@@ -89,16 +89,11 @@ start_service() {
 	# restart, and until it does the bus refuses the node exactly as it always
 	# has for a node with no token.
 	#
-	# The legacy inline value is passed ONLY when the migration above could not
-	# write the file, so that a box whose /etc/rasputin is unwritable keeps the
-	# credential it already has instead of dropping off the bus. An agent that
-	# gets both prefers the file; this deliberately passes one or the other.
-	if [ ! -s "$join_token_file" ] && [ -n "$join_token" ]; then
-		logger -t rasputin-agent "WARNING: $join_token_file is missing, so the join token is being passed inline from /etc/config/rasputin. Fix $join_token_file: an inline token cannot be re-read while the agent runs."
-		procd_append_param env RASPUTIN_CP_JOIN_TOKEN="$join_token"
-	else
-		procd_append_param env RASPUTIN_CP_JOIN_TOKEN_FILE="$join_token_file"
-	fi
+	# The file is the only form ever passed. The agent no longer reads an
+	# inline RASPUTIN_CP_JOIN_TOKEN (geekdojo/geekdojo-brain#539), so a box
+	# whose migration above could not write the file runs with no token until
+	# a later start writes it; UCI keeps join_token so that start can.
+	procd_append_param env RASPUTIN_CP_JOIN_TOKEN_FILE="$join_token_file"
 	procd_append_param env RASPUTIN_NODE_ID="$node_id"
 	# The cluster's name, which the agent turns into "<cluster-id>.local" for
 	# hostsync. Always passed (with a default) rather than conditionally: an

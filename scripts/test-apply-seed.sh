@@ -41,6 +41,10 @@
 #     - a box seeded before this — the token still in UCI — is migrated by the
 #       agent's own init script on its next start, once, with no commit loop;
 #     - sysupgrade's file list keeps the token file.
+#   And for the retired inline token (geekdojo/geekdojo-brain#539):
+#     - when the token file cannot be written, the agent is still given only
+#       RASPUTIN_CP_JOIN_TOKEN_FILE, never the value; UCI keeps join_token so
+#       the next start retries, and a WARNING says the agent has no token.
 #
 # HOW
 #   1. rootfs-0 of a firewall A/B image is unsquashed (the latest STABLE
@@ -210,9 +214,13 @@ agent_stub() {
 }
 
 # agent_env — the environment init.d/rasputin-agent hands procd, one VAR=value
-# per line. Only the procd_* calls are stubbed; everything else is the image's.
+# per line. Only the procd_* calls and `logger` are stubbed; everything else is
+# the image's. There is no syslogd in a chroot to read a message back from, so
+# `logger` prints its message as a "#logger <message>" line instead, which no
+# VAR=value check below can mistake for the environment.
 agent_env() {
 	in_chroot /bin/sh -c '
+		logger() { [ "$1" = -t ] && shift 2; echo "#logger $*"; }
 		procd_open_instance() { :; }
 		procd_close_instance() { echo "#instance-closed"; }
 		procd_set_param() { :; }
@@ -753,6 +761,52 @@ if in_chroot /sbin/sysupgrade -l > "$WORK/keep-token.txt" 2> "$WORK/keep-token.e
 else
 	bad "sysupgrade -l failed in the chroot:"; sed 's/^/      /' "$WORK/keep-token.err" >&2
 fi
+
+echo "11e. the token file cannot be written: the agent is still given only the file"
+# TC-539-12 (geekdojo/geekdojo-brain#539). The agent no longer reads an inline
+# RASPUTIN_CP_JOIN_TOKEN, so init.d must never pass one, not even when the
+# migration in 11c fails. The file's parent here is a regular file, so mkdir
+# fails even as root, the way a broken or read-only /etc/rasputin would.
+BAD_TOKEN_FILE=/etc/rasputin/not-a-dir/join.token
+reset; rm -rf "$ROOT/etc/rasputin/not-a-dir"
+printf 'a file, not a directory\n' > "$ROOT/etc/rasputin/not-a-dir"
+cat > "$UCI" <<EOF
+config rasputin 'main'
+	option node_role 'firewall'
+	option nats_url 'nats://example-cluster.local:4222'
+	option join_token '$TOKEN'
+	option join_token_file '$BAD_TOKEN_FILE'
+	option node_id 'fw-test-1'
+	option cluster_id 'example-cluster'
+EOF
+agent_env > "$WORK/unwritable.env" 2>&1
+grep -qx "#instance-closed" "$WORK/unwritable.env" && ok "start_service reached the procd calls (the checks below mean something)" \
+	|| { bad "start_service never reached the procd calls:"; sed 's/^/      /' "$WORK/unwritable.env" >&2; }
+grep -qx "RASPUTIN_CP_JOIN_TOKEN_FILE=$BAD_TOKEN_FILE" "$WORK/unwritable.env" \
+	&& ok "the agent is given RASPUTIN_CP_JOIN_TOKEN_FILE=$BAD_TOKEN_FILE" \
+	|| { bad "the agent's environment does not name the token file:"; sed 's/^/      /' "$WORK/unwritable.env" >&2; }
+grep -q '^RASPUTIN_CP_JOIN_TOKEN=' "$WORK/unwritable.env" \
+	&& bad "the inline token was passed" || ok "no RASPUTIN_CP_JOIN_TOKEN= line"
+grep -qF -- "$TOKEN" "$WORK/unwritable.env" \
+	&& { bad "the token value appears in the agent's environment or the log:"; sed 's/^/      /' "$WORK/unwritable.env" >&2; } \
+	|| ok "the token value appears nowhere in the environment or the log"
+[ "$(uci_get rasputin.main.join_token)" = "$TOKEN" ] && ok "UCI still holds join_token, so the next start retries" \
+	|| bad "UCI join_token = '$(uci_get rasputin.main.join_token)', want the token kept"
+if grep -q "^#logger WARNING: could not write the join token to $BAD_TOKEN_FILE" "$WORK/unwritable.env" \
+	&& grep "^#logger WARNING:" "$WORK/unwritable.env" | grep -qF "the agent has no token and the bus refuses this node"; then
+	ok "a WARNING says the agent has no token until the write succeeds"
+else
+	bad "no WARNING saying the agent has no token:"; sed 's/^/      /' "$WORK/unwritable.env" >&2
+fi
+# A second start retries the move, and still passes no inline token.
+agent_env > "$WORK/unwritable2.env" 2>&1
+if grep -q "^#logger WARNING: could not write the join token" "$WORK/unwritable2.env" \
+	&& ! grep -q '^RASPUTIN_CP_JOIN_TOKEN=' "$WORK/unwritable2.env"; then
+	ok "the next start retries the move and still passes no inline token"
+else
+	bad "second start:"; sed 's/^/      /' "$WORK/unwritable2.env" >&2
+fi
+rm -rf "$ROOT/etc/rasputin/not-a-dir"
 
 echo
 if [ "$fail" -eq 0 ]; then
