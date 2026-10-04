@@ -926,5 +926,25 @@
 #                        dev.142 (canary #85 is still the latest report); the
 #                        Snort rules pin 94d7859a is current (upstream
 #                        Last-Modified still 2026-10-01 11:32 UTC).
-2026.09.6-dev.188
-sha256  67b45b03c01b03003ad2d72ad19f19717c6670ad11909f074ec05427658c406e  rasputin-agent-2026.09.6-dev.188-linux-amd64.tar.gz
+#   2026.09.6 (2026-10-04): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-pinned from the dev.188 prerelease to the CP STABLE
+#                        v2026.09.6, tagged on the same commit (CP b93d866) that
+#                        published dev.188, so the agent binary's code is identical.
+#                        No functional agent change against dev.188.
+#                        The dev chain this promotes is firewall 2026.09.6-dev.143
+#                        (agent dev.188). Against the 2026.09.5 stable the agent
+#                        carries control-plane #415 (plaintext bus ladder deleted,
+#                        geekdojo/geekdojo-brain#517), #417 (system-pool HTTPS
+#                        clients, #590), #418 (named security resolvers, #591),
+#                        #420 (collector trusts the Mesh chain, #672), #425
+#                        (registration gap at api start, #623) and #426
+#                        (key-bound backup transfer, #514).
+#                        Rebuild payload: the ImageBuilder feed refresh (canary
+#                        #85, 2026-09-28, is still the latest report). Snort
+#                        community rules at 94d7859a; the 2026-10-04 pre-flight's
+#                        freshness gate passed on it.
+#                        This release is the one rasputin-os 2026.09.6 bakes as its
+#                        offline firewall descriptor (stable only ever bakes
+#                        stable -- Bryce, 2026-09-27).
+2026.09.6
+sha256  53edbbe46adb9155a338ffb246af45c9c4a3020eaef5f4e7ab5ae78e35e25ba7  rasputin-agent-2026.09.6-linux-amd64.tar.gz
