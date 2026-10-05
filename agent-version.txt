@@ -946,5 +946,29 @@
 #                        This release is the one rasputin-os 2026.09.6 bakes as its
 #                        offline firewall descriptor (stable only ever bakes
 #                        stable -- Bryce, 2026-09-27).
-2026.09.6
-sha256  53edbbe46adb9155a338ffb246af45c9c4a3020eaef5f4e7ab5ae78e35e25ba7  rasputin-agent-2026.09.6-linux-amd64.tar.gz
+#   2026.10.0-dev.190 (2026-10-05): dev chain on the 2026.10.0 line. CP dev
+#                        release v2026.10.0-dev.190, built from CP main
+#                        317ed5a (ci, sast, vuln-scan, npm-audit and codeql
+#                        all green on that commit). Against the 2026.09.6
+#                        stable (CP b93d866) the agent carries:
+#                        - #429 (geekdojo/geekdojo-brain#516): backup
+#                          transfer runs on registered node keys only; the
+#                          legacy node HTTPS paths are deleted.
+#                        - #430 (geekdojo/geekdojo-brain#669): the bus pin is
+#                          read per handshake; only a controlplane's own
+#                          agent follows a restored agent.pin. On this
+#                          firewall the pin stays fixed for the process.
+#                        - #431 (geekdojo/geekdojo-brain#539): the join token
+#                          is read from RASPUTIN_CP_JOIN_TOKEN_FILE only; the
+#                          retired inline RASPUTIN_CP_JOIN_TOKEN is diagnosed,
+#                          never honoured. This image's init script already
+#                          hands the agent only the file (firewall #93).
+#                        #432, #433 change the api / CI registers only.
+#                        The bump keeps this image's agent in lockstep with
+#                        the agent/api the paired OS dev image vendors.
+#                        Rebuild payload: whatever the ImageBuilder feed moved
+#                        since 2026.09.6 (canary #85 is still the latest
+#                        report); the Snort rules pin 94d7859a is current
+#                        (upstream Last-Modified still 2026-10-01 11:32 UTC).
+2026.10.0-dev.190
+sha256  f02e39579428ea698ee8ed77bf2dfd60f6cdb20896666558c2aad9e63bb6ea76  rasputin-agent-2026.10.0-dev.190-linux-amd64.tar.gz
