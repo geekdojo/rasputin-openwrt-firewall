@@ -40,6 +40,6 @@ jobs:
           # Co-Authored-By trailer (noreply@anthropic.com) resolves to that
           # GitHub login and the action treats co-authors as committers; the
           # human contributor on a PR still has to sign.
-          allowlist: BryceAshey,claude,bot*
+          allowlist: hoodoo5x5,claude,bot*
           remote-organization-name: geekdojo
           remote-repository-name: cla-signatures
