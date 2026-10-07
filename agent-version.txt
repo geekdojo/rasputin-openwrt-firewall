@@ -970,5 +970,31 @@
 #                        since 2026.09.6 (canary #85 is still the latest
 #                        report); the Snort rules pin 94d7859a is current
 #                        (upstream Last-Modified still 2026-10-01 11:32 UTC).
-2026.10.0-dev.190
-sha256  f02e39579428ea698ee8ed77bf2dfd60f6cdb20896666558c2aad9e63bb6ea76  rasputin-agent-2026.10.0-dev.190-linux-amd64.tar.gz
+#   2026.10.0-dev.191 (2026-10-07): dev chain on the 2026.10.0 line. CP dev
+#                        release v2026.10.0-dev.191, built from CP main
+#                        14ae69c (ci, sast, vuln-scan, npm-audit, codeql and
+#                        gitleaks all green on that commit). Against
+#                        2026.10.0-dev.190 (CP 317ed5a) the agent carries:
+#                        - #454 (geekdojo/geekdojo-brain#741): node trust
+#                          moves to its own trust.install verb; the agent
+#                          stores the CA bundle, reloads tailscaled, keeps a
+#                          reload-pending marker for a failed reload, and
+#                          reports the bundle fingerprint at registration.
+#                        - #453 (geekdojo/geekdojo-brain#733): the agent's
+#                          logger redacts any attribute that can carry a
+#                          secret.Value.
+#                        - #443 (geekdojo/geekdojo-brain#827): comment-only
+#                          in the agent; the api now keys the firewall state
+#                          fingerprint and no longer compares the agent's
+#                          ack hash.
+#                        #437, #439, #440, #441, #442, #444-#449, #451, #452
+#                        and #455 change the api, ui or CI only.
+#                        The bump keeps this image's agent in lockstep with
+#                        the agent/api the paired OS dev image vendors.
+#                        Rebuild payload: whatever the ImageBuilder feed moved
+#                        since 2026.10.0-dev.147 (canary #95, 2026-10-05, is
+#                        the latest report), plus the Snort rules re-pin to
+#                        9d7fb9f4 that rides this PR (upstream republished,
+#                        Last-Modified 2026-10-06 14:03 UTC).
+2026.10.0-dev.191
+sha256  cc4b6494fd254a75b2d6fc23f4595037db9d52791d3a54e378e90b7dba93f5fb  rasputin-agent-2026.10.0-dev.191-linux-amd64.tar.gz
