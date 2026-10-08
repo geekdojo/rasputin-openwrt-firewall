@@ -996,5 +996,23 @@
 #                        the latest report), plus the Snort rules re-pin to
 #                        9d7fb9f4 that rides this PR (upstream republished,
 #                        Last-Modified 2026-10-06 14:03 UTC).
-2026.10.0-dev.191
-sha256  cc4b6494fd254a75b2d6fc23f4595037db9d52791d3a54e378e90b7dba93f5fb  rasputin-agent-2026.10.0-dev.191-linux-amd64.tar.gz
+#   2026.10.0 (2026-10-08): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-pinned from the dev.191 prerelease to the CP STABLE
+#                        v2026.10.0, tagged on the same commit (CP 14ae69c) that
+#                        published dev.191, so the agent binary's code is identical.
+#                        No functional agent change against dev.191.
+#                        The dev chain this promotes is firewall 2026.10.0-dev.148
+#                        (agent dev.191), bench-validated 2026-10-07. Against the
+#                        2026.09.6 stable the agent carries the changes listed
+#                        under 2026.10.0-dev.190 and 2026.10.0-dev.191 above.
+#                        Rebuild payload: the ImageBuilder feed refresh (canary
+#                        #95, 2026-10-05: libopenssl3 3.5.8 -> 3.5.9, uhttpd,
+#                        libiwinfo), plus the Snort community rules re-pin to
+#                        53d35648 that rides this PR (Talos republished
+#                        2026-10-08 13:29 UTC; the stable pre-flight's freshness
+#                        gate caught it).
+#                        This release is the one rasputin-os 2026.10.0 bakes as its
+#                        offline firewall descriptor (stable only ever bakes
+#                        stable -- Bryce, 2026-09-27).
+2026.10.0
+sha256  910ebabbecd37786cb00664ba83435b19759685959cf4369a21b7e31dee0fd5d  rasputin-agent-2026.10.0-linux-amd64.tar.gz
