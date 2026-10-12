@@ -1014,5 +1014,30 @@
 #                        This release is the one rasputin-os 2026.10.0 bakes as its
 #                        offline firewall descriptor (stable only ever bakes
 #                        stable -- Bryce, 2026-09-27).
-2026.10.0
-sha256  910ebabbecd37786cb00664ba83435b19759685959cf4369a21b7e31dee0fd5d  rasputin-agent-2026.10.0-linux-amd64.tar.gz
+#   2026.10.1-dev.194 (2026-10-12): dev chain on the 2026.10.1 line (the E22
+#                        store-arming chain, geekdojo/geekdojo-brain#804). CP
+#                        dev release v2026.10.1-dev.194, built from CP main
+#                        319e05d (ci, sast, vuln-scan, npm-audit, codeql and
+#                        gitleaks all green on that commit). Against the
+#                        2026.10.0 stable (CP 14ae69c) the agent carries:
+#                        - #457 (geekdojo/geekdojo-brain#831): the node-local
+#                          app proxy runs on compute nodes only, so it no
+#                          longer races the api for :443 on a controlplane.
+#                          No effect on this image (the firewall role never
+#                          ran the proxy).
+#                        - #459 (geekdojo/geekdojo-brain#832): each app's proxy
+#                          certificate is written 0600 and older leaves are
+#                          tightened at agent start.
+#                        #461-#469 change the api, the secret store and its
+#                        tests, or CI only; #434, #435 and #456 are ui
+#                        dependency bumps.
+#                        The bump keeps this image's agent in lockstep with
+#                        the agent/api the paired OS dev image vendors.
+#                        Rebuild payload: whatever the ImageBuilder feed moved
+#                        since 2026.10.0 (canary #99, 2026-10-12: LuCI
+#                        26.278 -> 26.284, tailscale 1.98.3 -> 1.102.3). The
+#                        OpenWrt base 25.12.5 is the latest point release and
+#                        the Snort rules pin 53d35648 still matches upstream
+#                        (canary #99), so neither moves.
+2026.10.1-dev.194
+sha256  1c3193e9e8b6924baf50858ba3992f237fcad8a9e0a200599662ae9cfc3e4e48  rasputin-agent-2026.10.1-dev.194-linux-amd64.tar.gz
