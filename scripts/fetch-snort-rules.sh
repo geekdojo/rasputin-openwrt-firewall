@@ -205,7 +205,14 @@ TARBALL_NAME="snort3-community-rules.tar.gz"
 # mirror's rasputin-refresh.yml run 37791429206 verified it (two downloads,
 # five-member layout, 4017 active rules, snort-mgr -v check under Snort
 # 3.10.0.0 in firewall 2026.09.6) and published sha256-53d35648eed3....
-PINNED_SHA="53d35648eed30ae6c160aa93d20d74d74e99e1895ebfc92740f26492ce6af93f"
+# -> 9576186deba7... (2026-10-13, 4017 active rules; a Talos republish). It
+# went live on snort.org at 2026-10-13 19:41 UTC (the S3 object's
+# Last-Modified). Found by the 2026.10.1 dev chain's freshness gate for
+# geekdojo/geekdojo-brain#853 (firewall release.yml run 38507169817), which
+# failed as designed. The mirror's rasputin-refresh.yml run 38507623430
+# verified it (all checks passed: 4017 active rules, snort-mgr -v check under
+# Snort 3.10.0.0 in firewall 2026.10.0) and published sha256-9576186deba7....
+PINNED_SHA="9576186deba77a49043433349962ab5ed224ffc8439a39a3a2a8009deabdcb10"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
