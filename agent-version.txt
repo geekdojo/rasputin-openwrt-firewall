@@ -1039,5 +1039,20 @@
 #                        OpenWrt base 25.12.5 is the latest point release and
 #                        the Snort rules pin 53d35648 still matches upstream
 #                        (canary #99), so neither moves.
-2026.10.1-dev.194
-sha256  1c3193e9e8b6924baf50858ba3992f237fcad8a9e0a200599662ae9cfc3e4e48  rasputin-agent-2026.10.1-dev.194-linux-amd64.tar.gz
+#   2026.10.1-dev.195 (2026-10-13): dev chain on the 2026.10.1 line
+#                        (geekdojo/geekdojo-brain#853). CP dev release
+#                        v2026.10.1-dev.195, built from CP main 5473531 (ci,
+#                        sast, vuln-scan, npm-audit, codeql and gitleaks all
+#                        green on that commit). Against dev.194 (319e05d) the
+#                        only change is #474: the control plane's api ships
+#                        the first-boot outcome journal lines to Loki. That
+#                        is api-only code (api/internal/obs, the api's
+#                        main.go), so there is no functional agent change.
+#                        The bump keeps this image's agent in lockstep with
+#                        the agent/api the paired OS dev image vendors.
+#                        Rebuild payload: whatever the ImageBuilder feed moved
+#                        since dev.194; canary #99 (2026-10-12) is still the
+#                        latest report, with the OpenWrt base 25.12.5 current
+#                        and the Snort rules pin 53d35648 matching upstream.
+2026.10.1-dev.195
+sha256  2845784f2adef02352033cf6dd4e8d290bfee4adc41a28746d41ba147531c15b  rasputin-agent-2026.10.1-dev.195-linux-amd64.tar.gz
