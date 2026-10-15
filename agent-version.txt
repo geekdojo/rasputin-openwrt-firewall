@@ -1054,5 +1054,27 @@
 #                        since dev.194; canary #99 (2026-10-12) is still the
 #                        latest report, with the OpenWrt base 25.12.5 current
 #                        and the Snort rules pin 53d35648 matching upstream.
-2026.10.1-dev.195
-sha256  2845784f2adef02352033cf6dd4e8d290bfee4adc41a28746d41ba147531c15b  rasputin-agent-2026.10.1-dev.195-linux-amd64.tar.gz
+#   2026.10.1 (2026-10-15): STABLE, lockstep across control-plane / os / firewall.
+#                        Re-pinned from the dev.195 prerelease to the CP STABLE
+#                        v2026.10.1, tagged on the same commit (CP 5473531) that
+#                        published dev.195, so the agent binary's code is identical.
+#                        No functional agent change against dev.195.
+#                        The dev chain this promotes is firewall 2026.10.1-dev.155
+#                        (agent dev.195), bench-validated with the 2026.10.1 batch.
+#                        Against the 2026.10.0 stable the agent carries the changes
+#                        listed under 2026.10.1-dev.194 and 2026.10.1-dev.195 above.
+#                        Rebuild payload: the ImageBuilder feed refresh, which
+#                        against dev.155's SBOM moves only LuCI: all 13 luci-*
+#                        packages 26.284.22350~8125d12 -> 26.287.39313~74c485a
+#                        (LuCI and uhttpd stay loopback-only via
+#                        rasputin-mgmt-harden; taken into the stable with
+#                        Bryce's approval, 2026-10-15). The other 187 SBOM lines
+#                        match dev.155. Plus the Snort community rules re-pin
+#                        to 03c4e856 (approved for this stable, 2026-10-15) that
+#                        rides this PR (Talos republished 2026-10-15 13:06 UTC;
+#                        the stable pre-flight's freshness gate caught it).
+#                        This release is the one rasputin-os 2026.10.1 bakes as its
+#                        offline firewall descriptor (stable only ever bakes
+#                        stable -- Bryce, 2026-09-27).
+2026.10.1
+sha256  e3def786dac445abd0419835bc7672fc79bab9b4151e192c3d54485d2231f8fd  rasputin-agent-2026.10.1-linux-amd64.tar.gz
