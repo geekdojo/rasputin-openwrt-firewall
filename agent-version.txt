@@ -1098,5 +1098,26 @@
 #                        live on snort.org 2026-10-16 16:34 UTC; mirror run
 #                        39029616178 verified it), so this dev build's
 #                        freshness gate passes.
-2026.10.2-dev.197
-sha256  672edc305aef776f38bd3089929477c17495fa18652868004c5e6c8901321949  rasputin-agent-2026.10.2-dev.197-linux-amd64.tar.gz
+#   2026.10.2 (2026-10-19): STABLE, lockstep across control-plane / os / firewall
+#                        (approved for stable by Bryce, 2026-10-19).
+#                        Re-pinned from the dev.197 prerelease to the CP STABLE
+#                        v2026.10.2 (CP 00f6718). v2026.10.2's agent code equals
+#                        dev.197's: CP 2975b6a..00f6718 is docs only
+#                        (git diff --stat 2975b6a 00f6718 -- agent/ is empty; the
+#                        range touches AGENTS.md alone). No functional agent change
+#                        against dev.197. sha256 taken verbatim from the release's
+#                        rasputin-agent-2026.10.2-linux-amd64.tar.gz.hash asset.
+#                        Rebuild payload, per canary #105 (2026-10-19) against the
+#                        2026.10.1 SBOM: all 13 luci-* packages
+#                        26.287.39313~74c485a -> 26.288.56989~75a306d (LuCI and
+#                        uhttpd stay loopback-only via rasputin-mgmt-harden), and
+#                        tailscale 1.102.3-r1 -> 1.104.1-r1. Snort rules pin
+#                        unchanged at 7f212f7b (upstream still matches; pre-flight
+#                        run 39314201016 passed the freshness gate). OpenWrt base
+#                        stays 25.12.5 (25.12.6 is out; a base bump is a human step
+#                        with hardware re-validation, not part of this re-pin).
+#                        This release is the one rasputin-os 2026.10.2 bakes as its
+#                        offline firewall descriptor (stable only ever bakes
+#                        stable -- Bryce, 2026-09-27).
+2026.10.2
+sha256  f8364efd650da85c27418195d17f75c22c9a403a5afb45cdba5d8d328a7cf745  rasputin-agent-2026.10.2-linux-amd64.tar.gz
