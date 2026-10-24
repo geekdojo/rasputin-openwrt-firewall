@@ -1119,5 +1119,28 @@
 #                        This release is the one rasputin-os 2026.10.2 bakes as its
 #                        offline firewall descriptor (stable only ever bakes
 #                        stable -- Bryce, 2026-09-27).
-2026.10.2
-sha256  f8364efd650da85c27418195d17f75c22c9a403a5afb45cdba5d8d328a7cf745  rasputin-agent-2026.10.2-linux-amd64.tar.gz
+#   2026.10.3-dev.199 (2026-10-24): dev chain A on the 2026.10.3 line
+#                        (epic geekdojo/geekdojo-brain#708, the E22 store
+#                        rollback batch). CP dev release v2026.10.3-dev.199,
+#                        built from CP main 24b2e84 (ci, vuln-scan, sast, codeql,
+#                        npm-audit and gitleaks all green on that commit).
+#                        Against the 2026.10.2 stable (CP 00f6718) the code the
+#                        agent links changes in two places: backupxfer/server.go
+#                        (CP #490: the ingest endpoint answers an over-bound
+#                        upload with 413 before the body, and drains a mid-body
+#                        refusal so the coded refusal reaches the client) and a
+#                        new agent test, agent/internal/health/nostore_test.go
+#                        (#488). No other agent/ change; #485-#489 and #492-#494
+#                        change the api, its tests and docs. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.3-dev.199-linux-amd64.tar.gz.hash
+#                        asset. The bump keeps this image's agent in lockstep
+#                        with the agent/api the paired OS dev image vendors.
+#                        Rebuild payload: whatever the ImageBuilder feed moved
+#                        since 2026.10.2; canary #105 (2026-10-19) is still the
+#                        latest report. Plus the Snort community rules re-pin to
+#                        d267a508 that rides this PR (Talos republished; live on
+#                        snort.org 2026-10-21 20:39 UTC; mirror run 39783334521
+#                        verified it), so this dev build's freshness gate passes.
+2026.10.3-dev.199
+sha256  5cbbee86c3b8ed31374ac4a4801902afa3900ea590bf853dd7de561ccfb18106  rasputin-agent-2026.10.3-dev.199-linux-amd64.tar.gz
