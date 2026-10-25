@@ -1142,5 +1142,18 @@
 #                        d267a508 that rides this PR (Talos republished; live on
 #                        snort.org 2026-10-21 20:39 UTC; mirror run 39783334521
 #                        verified it), so this dev build's freshness gate passes.
-2026.10.3-dev.199
-sha256  5cbbee86c3b8ed31374ac4a4801902afa3900ea590bf853dd7de561ccfb18106  rasputin-agent-2026.10.3-dev.199-linux-amd64.tar.gz
+#   2026.10.3-dev.200 (2026-10-25): dev chain B on the 2026.10.3 line
+#                        (epic geekdojo/geekdojo-brain#708). CP dev release
+#                        v2026.10.3-dev.200, built from CP main 24b2e84, the same
+#                        commit as dev.199 (ci, vuln-scan, sast, codeql,
+#                        npm-audit and gitleaks all green on it). No source
+#                        change against dev.199: chain B exists to give the OS a
+#                        second, newer dev release of the same code. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.3-dev.200-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: whatever the ImageBuilder feed
+#                        moved since dev.164; canary #105 (2026-10-19) is still
+#                        the latest report. Snort rules pin unchanged at d267a508
+#                        (upstream still matches, 2026-10-25).
+2026.10.3-dev.200
+sha256  00382548116922a6537411a6bdeff6eafbfbf86de2f0935c7c2d00df76cfbff7  rasputin-agent-2026.10.3-dev.200-linux-amd64.tar.gz
