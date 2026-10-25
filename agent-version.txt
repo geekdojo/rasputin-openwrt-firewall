@@ -1155,5 +1155,23 @@
 #                        moved since dev.164; canary #105 (2026-10-19) is still
 #                        the latest report. Snort rules pin unchanged at d267a508
 #                        (upstream still matches, 2026-10-25).
-2026.10.3-dev.200
-sha256  00382548116922a6537411a6bdeff6eafbfbf86de2f0935c7c2d00df76cfbff7  rasputin-agent-2026.10.3-dev.200-linux-amd64.tar.gz
+#   2026.10.3-dev.201 (2026-10-25): dev chain A2 on the 2026.10.3 line
+#                        (epic geekdojo/geekdojo-brain#708). CP dev release
+#                        v2026.10.3-dev.201, built from CP main d47b666 (ci,
+#                        vuln-scan, sast, codeql, npm-audit and gitleaks all
+#                        green on that commit). Against dev.200 (CP 24b2e84) it
+#                        adds #495 (api only: the store restarts once after a
+#                        full disk is freed) and #496 (agent/internal/bus and
+#                        agent main: on the control plane's own agent a valid
+#                        agent.pin outranks RASPUTIN_BUS_PIN). #496 changes no
+#                        behaviour on this image: the firewall agent passes no
+#                        control-plane pin path and still resolves the env pin,
+#                        then the saved file, as before. sha256 taken verbatim
+#                        from the release's
+#                        rasputin-agent-2026.10.3-dev.201-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: whatever the ImageBuilder feed
+#                        moved since dev.165; canary #105 (2026-10-19) is still
+#                        the latest report. Snort rules pin unchanged at d267a508
+#                        (upstream still matches, 2026-10-25).
+2026.10.3-dev.201
+sha256  2646beceae287fc7ca05191623e8e281429b7f306a5076d6731912119ef43a76  rasputin-agent-2026.10.3-dev.201-linux-amd64.tar.gz
