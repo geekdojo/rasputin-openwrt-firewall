@@ -1173,5 +1173,18 @@
 #                        moved since dev.165; canary #105 (2026-10-19) is still
 #                        the latest report. Snort rules pin unchanged at d267a508
 #                        (upstream still matches, 2026-10-25).
-2026.10.3-dev.201
-sha256  2646beceae287fc7ca05191623e8e281429b7f306a5076d6731912119ef43a76  rasputin-agent-2026.10.3-dev.201-linux-amd64.tar.gz
+#   2026.10.3-dev.202 (2026-10-25): dev chain B2 on the 2026.10.3 line
+#                        (epic geekdojo/geekdojo-brain#708). CP dev release
+#                        v2026.10.3-dev.202, built from CP main d47b666, the same
+#                        commit as dev.201 (ci, vuln-scan, sast, codeql,
+#                        npm-audit and gitleaks all green on it). No source
+#                        change against dev.201: chain B2 exists to give the OS
+#                        a second, newer dev release of the same code. sha256
+#                        taken verbatim from the release's
+#                        rasputin-agent-2026.10.3-dev.202-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: whatever the ImageBuilder feed
+#                        moved since dev.166; canary #105 (2026-10-19) is still
+#                        the latest report. Snort rules pin unchanged at d267a508
+#                        (upstream still matches, 2026-10-25).
+2026.10.3-dev.202
+sha256  c25ce98da276396f42bde59134044991d39c311c449e5569c716a1c2df68ecd5  rasputin-agent-2026.10.3-dev.202-linux-amd64.tar.gz
