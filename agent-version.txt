@@ -1186,5 +1186,17 @@
 #                        moved since dev.166; canary #105 (2026-10-19) is still
 #                        the latest report. Snort rules pin unchanged at d267a508
 #                        (upstream still matches, 2026-10-25).
-2026.10.3-dev.202
-sha256  c25ce98da276396f42bde59134044991d39c311c449e5569c716a1c2df68ecd5  rasputin-agent-2026.10.3-dev.202-linux-amd64.tar.gz
+#   2026.10.3 (2026-10-26): lockstep STABLE 2026.10.3 (secrets store step 4,
+#                        epic geekdojo/geekdojo-brain#708). Re-pinned from the
+#                        dev.202 prerelease to the CP STABLE v2026.10.3, built
+#                        from CP main c6a67a4. No functional agent change
+#                        against dev.202: the two CP merges since are a test
+#                        fix (#501) and the UI SPONSOR link (#500), neither in
+#                        the agent. sha256 taken verbatim from the release's
+#                        rasputin-agent-2026.10.3-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: whatever the ImageBuilder feed
+#                        moved since dev.167. Snort rules pin unchanged at
+#                        d267a508 (pre-flight run 168's freshness gate passed,
+#                        2026-10-26).
+2026.10.3
+sha256  affae8e6e6a661e16cf98463afc5d0594b7c12bd7228a0085a8163f0fd909f4b  rasputin-agent-2026.10.3-linux-amd64.tar.gz
