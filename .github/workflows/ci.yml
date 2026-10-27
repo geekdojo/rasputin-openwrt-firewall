@@ -25,7 +25,7 @@
 ##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh,
 ##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh,
 ##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs),
-##   scripts/test-agent-pin.sh and scripts/test-ci-debs.sh.
+##   and scripts/test-agent-pin.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -137,16 +137,6 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
-      # scripts/ci-debs.sh puts QEMU + OVMF on the smoke-fw runner from
-      # actions/cache, and fetches them itself with a speed floor on a miss
-      # (2026-10-27: the mirror trickled at 37.6 kB/s and the smoke never ran).
-      # Its refusals are the point: a trickling, 404ing or lying mirror, a
-      # tampered cache. Run against local HTTP servers, no internet.
-      - name: CI package-cache tests
-        timeout-minutes: 5
-        env:
-          REQUIRE_DPKG: "1"
-        run: ./scripts/test-ci-debs.sh
       # rasputin-tailscale gives tailscaled SSL_CERT_FILE and, on the way,
       # rewrites the box's global CA bundle to drop the Mesh CA an older agent
       # appended (geekdojo/geekdojo-brain#542). That bundle is what every TLS
@@ -181,22 +171,20 @@ jobs:
       # downstream can tell "still working" from "wedged", and the PR merged
       # with that check still pending. An unbounded wait in CI is the same bug
       # as an unbounded wait anywhere else.
+      # skip-if-present: the hosted images usually ship mkfs.vfat, and apt is
+      # the slowest and least reliable part of this job, so the best version of
+      # this step is the one that does nothing. When it is missing, the shared
+      # ci-debs action installs it from a package cache, with a speed floor on
+      # the mirror (an apt install has no minimum speed: 2026-10-27, a 37.6 kB/s
+      # mirror lost a firewall build).
       - name: Ensure mkfs.vfat is available
-        timeout-minutes: 5
-        run: |
-          # Skip the package manager entirely when the tool is already here —
-          # which on the hosted images it usually is. apt is the slowest and by
-          # far the least reliable part of this job, so the best version of this
-          # step is the one that does nothing.
-          if command -v mkfs.vfat >/dev/null 2>&1; then
-            echo "dosfstools already present at $(command -v mkfs.vfat)"
-            exit 0
-          fi
-          # DPkg::Lock::Timeout so apt FAILS on a held lock instead of waiting
-          # on it forever, and DEBIAN_FRONTEND so nothing can stop for a prompt
-          # no one is there to answer.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 dosfstools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: dosfstools
+          packages: dosfstools
+          require: mkfs.vfat
+          skip-if-present: 'true'
 
       - name: Seed-scrub functional test
         timeout-minutes: 5
@@ -232,16 +220,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Through the shared ci-debs action: a package cache, and a speed floor
+      # on the mirror when the tools are missing (they usually are not).
       - name: Ensure unsquashfs and sfdisk are available
-        timeout-minutes: 5
-        run: |
-          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
-            echo "squashfs-tools + fdisk already present"
-            exit 0
-          fi
-          # Bounded: fail on a held lock instead of waiting forever.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-fdisk
+          packages: squashfs-tools fdisk
+          require: unsquashfs sfdisk
+          skip-if-present: 'true'
 
       # This branch's files/ over the latest stable image's rootfs, under chroot:
       # the real busybox sources the seed, the real uci stores it, and the real
@@ -266,16 +254,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # As in apply-seed: the shared ci-debs action, skipped when present.
       - name: Ensure unsquashfs and sfdisk are available
-        timeout-minutes: 5
-        run: |
-          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
-            echo "squashfs-tools + fdisk already present"
-            exit 0
-          fi
-          # Bounded, as above: fail on a held lock instead of waiting forever.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-fdisk
+          packages: squashfs-tools fdisk
+          require: unsquashfs sfdisk
+          skip-if-present: 'true'
 
       # Runs the REAL rules check (extract rootfs-0, chroot, snort-mgr -v check)
       # against the latest stable image: its own rules must pass; a broken rule,

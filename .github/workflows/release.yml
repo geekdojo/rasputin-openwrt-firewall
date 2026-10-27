@@ -158,16 +158,6 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
-      # scripts/ci-debs.sh puts QEMU + OVMF on the smoke-fw runner from
-      # actions/cache, and fetches them itself with a speed floor on a miss
-      # (2026-10-27: the mirror trickled at 37.6 kB/s and the smoke never ran).
-      # Its refusals are the point: a trickling, 404ing or lying mirror, a
-      # tampered cache. Run against local HTTP servers, no internet.
-      - name: CI package-cache tests
-        timeout-minutes: 5
-        env:
-          REQUIRE_DPKG: "1"
-        run: ./scripts/test-ci-debs.sh
       # The tailscale-init and dhcp-auto behaviour tests ci.yml runs on every
       # PR, run again here. Both cover a decision the image makes once, at boot,
       # on hardware: what tailscaled trusts (geekdojo/geekdojo-brain#542) and
@@ -185,22 +175,20 @@ jobs:
       # The seed scrub blanks a credential during first-boot provisioning, and
       # ImageBuilder packages files/ verbatim without executing anything — a
       # broken scrub would build, sign and publish cleanly.
+      # skip-if-present: the hosted images usually ship mkfs.vfat, and apt is
+      # the slowest and least reliable part of this job, so the best version of
+      # this step is the one that does nothing. When it is missing, the shared
+      # ci-debs action installs it from a package cache, with a speed floor on
+      # the mirror (an apt install has no minimum speed: 2026-10-27, a 37.6 kB/s
+      # mirror lost a firewall build).
       - name: Ensure mkfs.vfat is available
-        timeout-minutes: 5
-        run: |
-          # Skip the package manager entirely when the tool is already here —
-          # which on the hosted images it usually is. apt is the slowest and by
-          # far the least reliable part of this job, so the best version of this
-          # step is the one that does nothing.
-          if command -v mkfs.vfat >/dev/null 2>&1; then
-            echo "dosfstools already present at $(command -v mkfs.vfat)"
-            exit 0
-          fi
-          # DPkg::Lock::Timeout so apt FAILS on a held lock instead of waiting
-          # on it forever, and DEBIAN_FRONTEND so nothing can stop for a prompt
-          # no one is there to answer.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 dosfstools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: dosfstools
+          packages: dosfstools
+          require: mkfs.vfat
+          skip-if-present: 'true'
 
       - name: Seed-scrub functional test
         timeout-minutes: 5
@@ -470,6 +458,19 @@ jobs:
             imagebuilder/dl
           key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
 
+      # The image tools for the assemble step and the rules check below, from
+      # the shared ci-debs action: a package cache, and a speed floor on the
+      # mirror on a miss. A bare apt install has no bound that holds: 2026-08-19
+      # lost 2.5 hours to an unbounded one, and on 2026-10-27 a mirror trickling
+      # at 37.6 kB/s outlasted a 10-minute step (apt has no minimum speed).
+      - name: Install image tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: image-tools
+          packages: genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin squashfs-tools
+          require: genimage mcopy sfdisk grub-mkimage grub-editenv unsquashfs
+
       - name: Assemble A/B image (genimage post-process)
         timeout-minutes: 20
         run: |
@@ -479,14 +480,7 @@ jobs:
           # disk (ESP + rootfs-0/1 + rootfs_data). grub2 tools build our own EFI
           # loader with the loadenv+test modules the boot-counter needs; mtools/
           # fdisk/util-linux extract kernel+rootfs; genimage assembles.
-          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
-          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
-          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
-          # the smoke job, on top of a 28-minute one in ci.yml the same night.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            -o DPkg::Lock::Timeout=120 \
-            genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin
+          # The tools come from the step before (the shared ci-debs action).
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
           # OpenWrt's combined-efi .img.gz has trailing NUL padding, so gunzip
@@ -509,9 +503,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          # Bounded apt, as above. fdisk (sfdisk) came in with the assemble step.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            -o DPkg::Lock::Timeout=120 squashfs-tools
+          # squashfs-tools and fdisk came in with "Install image tools".
           ver="${{ steps.ver.outputs.version }}"
           sudo ./scripts/rasputin-snort-rules-check.sh "ab-out/rasputin-fw-n100-${ver}-ab.img.gz"
 
@@ -555,74 +547,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # QEMU + OVMF come from actions/cache, not from an Ubuntu mirror, on every
-      # run but the first on a new runner image. Raising the step timeout or
-      # retrying apt would only wait longer on the same failure:
-      #
-      #   2026-10-27, run 40537097987: the apt index came down at 10.9 MB/s, then
-      #   the 20 .debs (24 MB) came down from azure.archive.ubuntu.com at
-      #   37.6 kB/s. ovmf-generic (5.4 MB) took 2m11s; qemu-system-x86 (11.5 MB)
-      #   stalled, was dropped and re-fetched for 3m43s; the step hit its
-      #   10-minute timeout before dpkg had unpacked a thing. 2026-10-25 had a
-      #   4m22s and a 1m35s install of the same set (normal is 10-16 s).
-      #
-      # The 2026-08-19 fix (bounded apt options, then sed-ing archive.ubuntu.com
-      # to azure.archive.ubuntu.com) could not hold, for two measured reasons:
-      # apt has no minimum-speed option, so a transfer that trickles rather than
-      # dies never trips Acquire::*::Timeout; and the runner's sources already
-      # point at the Azure mirror through mirror+file:/etc/apt/apt-mirrors.txt,
-      # so the rewrite matched nothing — today's trickle WAS the Azure mirror.
-      #
-      # Chosen over the alternatives by risk/value/effort:
-      #   - a container image with qemu baked in means building, publishing and
-      #     patching an image of our own, for a smoke boot;
-      #   - pinned .debs from a fixed source break the day ubuntu-latest moves
-      #     its base libraries, and would need a host we publish to;
-      #   - this cache needs neither. Its key (scripts/ci-debs.sh key) hashes the
-      #     runner's whole installed package base, so cached .debs only ever land
-      #     on the exact base apt resolved them against: the warm path is
-      #     `sha256sum -c`, then apt installs the local files with --no-download:
-      #     no network and no apt index at all.
-      # The cold path (a miss: new runner image, or 7 days unused) resolves with
-      # apt but downloads each .deb itself with a speed FLOOR — under 100 kB/s
-      # for 15 s and that mirror is dropped for the next — verifies size and
-      # hash against the signed index, and lets apt install them with
-      # --no-download. Every refusal is a ::error:: naming the package and each
-      # mirror tried; nothing here skips the boot below.
-      - name: QEMU + OVMF cache key
-        id: debkey
-        timeout-minutes: 2
-        run: echo "key=qemu-ovmf-$(./scripts/ci-debs.sh key qemu-system-x86 ovmf)" >> "$GITHUB_OUTPUT"
-      - name: Restore QEMU + OVMF packages
-        id: debcache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/qemu-debs
-          key: ${{ steps.debkey.outputs.key }}
+      # QEMU + OVMF through the shared ci-debs action: the exact .debs from
+      # actions/cache, and on a miss a download with a per-mirror speed floor.
+      # Raising the step timeout or retrying apt would only wait longer on the
+      # same failure (2026-10-27, run 40537097987: the .debs came down from
+      # azure.archive.ubuntu.com at 37.6 kB/s and the step timed out before
+      # dpkg unpacked a thing; apt has no minimum-speed option). The action's
+      # header says why this design over the alternatives.
       - name: Install QEMU + OVMF
-        id: debinstall
         timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: qemu-ovmf
+          packages: qemu-system-x86 ovmf
+          require: qemu-system-x86_64
+      # OVMF is firmware, not a command, so `require` cannot see it.
+      - name: OVMF firmware is present
+        timeout-minutes: 2
         run: |
           set -eu
-          if [ "${{ steps.debcache.outputs.cache-hit }}" = "true" ]; then
-            ./scripts/ci-debs.sh install "$RUNNER_TEMP/qemu-debs"
-          else
-            ./scripts/ci-debs.sh fetch "$RUNNER_TEMP/qemu-debs" qemu-system-x86 ovmf
-            [ -s "$RUNNER_TEMP/qemu-debs/SHA256SUMS" ] && echo "fetched=true" >> "$GITHUB_OUTPUT"
-          fi
-          command -v qemu-system-x86_64 >/dev/null \
-            || { echo "::error::qemu-system-x86_64 is not on PATH after the install"; exit 1; }
           ls /usr/share/OVMF/OVMF_CODE*.fd >/dev/null 2>&1 \
             || { echo "::error::no OVMF_CODE*.fd under /usr/share/OVMF after the install"; exit 1; }
           qemu-system-x86_64 --version | head -1
-      # Save only a set this run fetched AND installed: the install step fails
-      # first on anything incomplete, so a cache entry is always a working set.
-      - name: Save QEMU + OVMF packages
-        if: ${{ steps.debinstall.outputs.fetched == 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/qemu-debs
-          key: ${{ steps.debkey.outputs.key }}
       - uses: actions/download-artifact@v4
         with:
           pattern: fw-n100-*
