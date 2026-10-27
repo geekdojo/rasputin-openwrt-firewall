@@ -1198,5 +1198,47 @@
 #                        moved since dev.167. Snort rules pin unchanged at
 #                        d267a508 (pre-flight run 168's freshness gate passed,
 #                        2026-10-26).
-2026.10.3
-sha256  affae8e6e6a661e16cf98463afc5d0594b7c12bd7228a0085a8163f0fd909f4b  rasputin-agent-2026.10.3-linux-amd64.tar.gz
+#   2026.10.4-dev.204 (2026-10-27): dev chain on the 2026.10.4 line (Feature
+#                        geekdojo/geekdojo-brain#713). CP dev release
+#                        v2026.10.4-dev.204, built from CP main acb82f5.
+#                        Against the 2026.10.3 stable (CP c6a67a4) it carries
+#                        #730 (consent warning: api and UI only), #884 (host
+#                        PID/IPC rated host-trusting: tileschema/privilege.go,
+#                        which the agent does not call; the agent uses
+#                        tileschema only for quiesce and backup classes), #776
+#                        (typed app secrets beside the deploy command: the new
+#                        agent verb docker.deploy_secrets, proto/apps.go and
+#                        agent/internal/docker/secretenv.go), Dependabot #499,
+#                        #482, #498 and #473 (eslint 10, UI only).
+#                        No functional agent change on this path. #776 lives
+#                        entirely in agent/internal/docker, and the docker
+#                        handlers register only on compute and controlplane
+#                        agents (cmd/rasputin-agent/main.go gates on
+#                        RoleCompute || RoleControlPlane); this image runs
+#                        RASPUTIN_NODE_ROLE=firewall, so the firewall agent
+#                        never subscribes to docker.deploy_secrets and never
+#                        runs the changed deploy path. The api refuses a
+#                        secret-bearing deploy below the verb's floor, which
+#                        is this release (proto/agentverbs.go).
+#                        The one change that does ride this box's path is the
+#                        bus client's dependencies (#498): nats.go 1.53.1 ->
+#                        1.54.0 and klauspost/compress 1.20.1 -> 1.20.3
+#                        (indirect). x/sys and x/crypto moved in backupxfer's
+#                        go.mod only; the agent's go.mod and go.sum already
+#                        held x/sys 0.49.0 and x/crypto 0.58.0, so the agent
+#                        links the same versions as 2026.10.3. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.4-dev.204-linux-amd64.tar.gz.hash
+#                        asset.
+#                        Rebuild payload, from PR #113 (merged 2026-10-27):
+#                        OpenWrt base 25.12.5 -> 25.12.6, so Linux kernel
+#                        6.12.94 -> 6.12.112 with its 67 kmods, base-files
+#                        1711 -> 1718, and ca-bundle 20260816-r1 -> r2; no
+#                        other package moved. Snort community rules re-pinned
+#                        d267a508 -> 3beff456 (Talos republish, live on
+#                        snort.org 2026-10-27 11:27 UTC; pin history in
+#                        fetch-snort-rules.sh). The base bump changes the
+#                        kernel, so this image needs bench re-validation
+#                        before it ships.
+2026.10.4-dev.204
+sha256  b84d7421a57e084cb88ab3cb2441da0e9095aa42334cb655c3653e3644812bb1  rasputin-agent-2026.10.4-dev.204-linux-amd64.tar.gz
