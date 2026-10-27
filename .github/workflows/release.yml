@@ -158,6 +158,16 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
+      # scripts/ci-debs.sh puts QEMU + OVMF on the smoke-fw runner from
+      # actions/cache, and fetches them itself with a speed floor on a miss
+      # (2026-10-27: the mirror trickled at 37.6 kB/s and the smoke never ran).
+      # Its refusals are the point: a trickling, 404ing or lying mirror, a
+      # tampered cache. Run against local HTTP servers, no internet.
+      - name: CI package-cache tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_DPKG: "1"
+        run: ./scripts/test-ci-debs.sh
       # The tailscale-init and dhcp-auto behaviour tests ci.yml runs on every
       # PR, run again here. Both cover a decision the image makes once, at boot,
       # on hardware: what tailscaled trusts (geekdojo/geekdojo-brain#542) and
@@ -544,42 +554,74 @@ jobs:
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      # QEMU + OVMF come from actions/cache, not from an Ubuntu mirror, on every
+      # run but the first on a new runner image. Raising the step timeout or
+      # retrying apt would only wait longer on the same failure:
+      #
+      #   2026-10-27, run 40537097987: the apt index came down at 10.9 MB/s, then
+      #   the 20 .debs (24 MB) came down from azure.archive.ubuntu.com at
+      #   37.6 kB/s. ovmf-generic (5.4 MB) took 2m11s; qemu-system-x86 (11.5 MB)
+      #   stalled, was dropped and re-fetched for 3m43s; the step hit its
+      #   10-minute timeout before dpkg had unpacked a thing. 2026-10-25 had a
+      #   4m22s and a 1m35s install of the same set (normal is 10-16 s).
+      #
+      # The 2026-08-19 fix (bounded apt options, then sed-ing archive.ubuntu.com
+      # to azure.archive.ubuntu.com) could not hold, for two measured reasons:
+      # apt has no minimum-speed option, so a transfer that trickles rather than
+      # dies never trips Acquire::*::Timeout; and the runner's sources already
+      # point at the Azure mirror through mirror+file:/etc/apt/apt-mirrors.txt,
+      # so the rewrite matched nothing — today's trickle WAS the Azure mirror.
+      #
+      # Chosen over the alternatives by risk/value/effort:
+      #   - a container image with qemu baked in means building, publishing and
+      #     patching an image of our own, for a smoke boot;
+      #   - pinned .debs from a fixed source break the day ubuntu-latest moves
+      #     its base libraries, and would need a host we publish to;
+      #   - this cache needs neither. Its key (scripts/ci-debs.sh key) hashes the
+      #     runner's whole installed package base, so cached .debs only ever land
+      #     on the exact base apt resolved them against: the warm path is
+      #     `sha256sum -c` + `dpkg -i`, with no network and no apt index at all.
+      # The cold path (a miss: new runner image, or 7 days unused) resolves with
+      # apt but downloads each .deb itself with a speed FLOOR — under 100 kB/s
+      # for 15 s and that mirror is dropped for the next — verifies size and
+      # hash against the signed index, and lets apt install them with
+      # --no-download. Every refusal is a ::error:: naming the package and each
+      # mirror tried; nothing here skips the boot below.
+      - name: QEMU + OVMF cache key
+        id: debkey
+        timeout-minutes: 2
+        run: echo "key=qemu-ovmf-$(./scripts/ci-debs.sh key qemu-system-x86 ovmf)" >> "$GITHUB_OUTPUT"
+      - name: Restore QEMU + OVMF packages
+        id: debcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/qemu-debs
+          key: ${{ steps.debkey.outputs.key }}
       - name: Install QEMU + OVMF
+        id: debinstall
         timeout-minutes: 10
         run: |
           set -eu
-          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
-          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
-          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
-          # the smoke job, on top of a 28-minute one in ci.yml the same night.
-          if command -v qemu-system-x86_64 >/dev/null 2>&1 && [ -e /usr/share/OVMF/OVMF_CODE.fd ]; then
-            echo "qemu-system-x86 + ovmf already present"
-            exit 0
+          if [ "${{ steps.debcache.outputs.cache-hit }}" = "true" ]; then
+            ./scripts/ci-debs.sh install "$RUNNER_TEMP/qemu-debs"
+          else
+            ./scripts/ci-debs.sh fetch "$RUNNER_TEMP/qemu-debs" qemu-system-x86 ovmf
+            [ -s "$RUNNER_TEMP/qemu-debs/SHA256SUMS" ] && echo "fetched=true" >> "$GITHUB_OUTPUT"
           fi
-          # Acquire::* as well as DPkg::Lock::Timeout, because they cover
-          # DIFFERENT hangs and only the lock one was covered before. The lock
-          # timeout does nothing for a stalled mirror fetch, and a stalled fetch
-          # is what this step did twice on 2026-08-19 — ten minutes of silence,
-          # no output at all, while the SAME run's build job had installed its
-          # genimage packages through apt minutes earlier.
-          # Point apt at the Azure regional mirror before doing anything else.
-          # The runners live in Azure; archive.ubuntu.com is the canonical
-          # archive and is the thing that actually stalled here — on 2026-08-19
-          # this step fetched packages.microsoft.com and dl.google.com in
-          # milliseconds, reached archive.ubuntu.com, and then emitted NOTHING
-          # for nine and a half minutes until the step timeout. Acquire::*
-          # timeouts do not save you from a transfer that trickles rather than
-          # dies, so the fix is to stop asking the slow host.
-          # Noble uses deb822, older images the one-line format; rewrite both.
-          sudo sed -i 's|https\?://archive\.ubuntu\.com|http://azure.archive.ubuntu.com|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources \
-            /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          APT_OPTS="-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3"
-          APT_OPTS="$APT_OPTS -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          # -q not -qq: some output is what tells the next person WHERE it stalled.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -q $APT_OPTS
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
-            --no-install-recommends $APT_OPTS qemu-system-x86 ovmf
+          command -v qemu-system-x86_64 >/dev/null \
+            || { echo "::error::qemu-system-x86_64 is not on PATH after the install"; exit 1; }
+          ls /usr/share/OVMF/OVMF_CODE*.fd >/dev/null 2>&1 \
+            || { echo "::error::no OVMF_CODE*.fd under /usr/share/OVMF after the install"; exit 1; }
+          qemu-system-x86_64 --version | head -1
+      # Save only a set this run fetched AND installed: the install step fails
+      # first on anything incomplete, so a cache entry is always a working set.
+      - name: Save QEMU + OVMF packages
+        if: ${{ steps.debinstall.outputs.fetched == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/qemu-debs
+          key: ${{ steps.debkey.outputs.key }}
       - uses: actions/download-artifact@v4
         with:
           pattern: fw-n100-*
