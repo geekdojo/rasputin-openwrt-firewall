@@ -7,7 +7,7 @@
 #   (2026-10-27, run 40537097987: 37.6 kB/s for 24 MB, step timed out). Its whole
 #   value is in the refusals: a trickling mirror abandoned in seconds instead of
 #   minutes, a truncated or tampered file refused rather than installed, a cached
-#   set whose checksums do not match refused before dpkg sees it, and an exit
+#   set whose checksums do not match refused before apt sees it, and an exit
 #   that is never zero when nothing was fetched. So most cases here are failure
 #   paths, run against REAL local HTTP servers (python3 http.server), not mocks:
 #     - a good mirror           -> file fetched, size and hash checked
@@ -18,7 +18,7 @@
 #     - every mirror bad        -> non-zero exit and a ::error:: naming each mirror
 #     - --print-uris parsing    -> plain and mirror+file: URIs, a missing size/hash
 #     - install                 -> refuses a missing SHA256SUMS, a tampered .deb,
-#                                  and an unlisted .deb, all before dpkg runs
+#                                  and an unlisted .deb, all before apt runs
 #     - key                     -> stable, and changes with the package list
 #                                  (needs dpkg-query; REQUIRE_DPKG=1 makes a
 #                                  missing one a failure, as CI sets it)
@@ -38,6 +38,7 @@ command -v python3 >/dev/null 2>&1 || { echo "✗ python3 is required" >&2; exit
 command -v curl >/dev/null 2>&1 || { echo "✗ curl is required" >&2; exit 1; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ci-debs-test.XXXXXX")"
+WORK="$(cd "$WORK" && pwd)"   # no doubled slash from a TMPDIR ending in /
 PIDS=""
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null || true; wait "$p" 2>/dev/null || true; done; rm -rf "$WORK"; }
 trap cleanup EXIT
@@ -148,9 +149,9 @@ if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "no size"; then ok "line with
 OUT="$(printf '%s\n' "'http://x/pool/f.deb' f.deb 10" | "$CD" parse-uris 2>&1)"; RC=$?
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "no hash"; then ok "line with no hash refused"; else bad "no hash: rc=$RC $OUT"; fi
 
-echo "install: the cached set is verified before dpkg sees it"
+echo "install: the cached set is verified before apt sees it"
 # A sudo that records instead of running, so a refusal that wrongly reaches
-# dpkg shows up as a recorded call rather than an attempted install.
+# apt shows up as a recorded call rather than an attempted install.
 mkdir -p "$WORK/bin"; printf '#!/bin/sh\necho "$@" >> "%s/sudo.calls"\n' "$WORK" > "$WORK/bin/sudo"; chmod +x "$WORK/bin/sudo"
 inst() { rm -f "$WORK/sudo.calls"; OUT="$(PATH="$WORK/bin:$PATH" "$CD" install "$1" 2>&1)"; RC=$?; }
 C="$WORK/cache"; mkdir -p "$C"
@@ -159,7 +160,7 @@ inst "$C"
 if [ "$RC" -ne 0 ] && [ ! -e "$WORK/sudo.calls" ] && printf '%s' "$OUT" | grep -q "SHA256SUMS is missing"; then ok "missing SHA256SUMS refused"; else bad "no sums: rc=$RC $OUT"; fi
 printf '%s  foo.deb\n' "$SHA" > "$C/SHA256SUMS"
 inst "$C"
-if [ "$RC" -eq 0 ] && grep -q "dpkg -i $C/foo.deb" "$WORK/sudo.calls"; then ok "verified set handed to dpkg -i"; else bad "good set: rc=$RC $OUT"; fi
+if [ "$RC" -eq 0 ] && grep -q "apt-get install .*--no-download.* /var/cache/apt/archives/foo.deb" "$WORK/sudo.calls"; then ok "verified set handed to apt-get --no-download"; else bad "good set: rc=$RC $OUT / calls: $(cat "$WORK/sudo.calls" 2>/dev/null)"; fi
 printf 'x' >> "$C/foo.deb"
 inst "$C"
 if [ "$RC" -ne 0 ] && [ ! -e "$WORK/sudo.calls" ] && printf '%s' "$OUT" | grep -q "refusing to install"; then ok "tampered .deb refused"; else bad "tampered: rc=$RC $OUT"; fi
