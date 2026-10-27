@@ -22,7 +22,7 @@
 #   The fix is to stop fetching on the common path at all:
 #     warm  — the .debs come out of actions/cache, are checked against the
 #             SHA256SUMS written when they were first verified, and go in with
-#             `dpkg -i`. No network, no apt index. Deterministic: the cache key
+#             apt-get --no-download as local files. No network, no apt index. Deterministic: the cache key
 #             (`key`) is a hash of the runner's installed package base, so the
 #             debs only ever land on the exact base they were resolved against.
 #     cold  — on a miss (a new runner image, or 7 days unused), `fetch` resolves
@@ -39,7 +39,7 @@
 #   ci-debs.sh key <pkg>...           print the cache key for <pkg>... on this runner
 #   ci-debs.sh fetch <dir> <pkg>...   cold path: resolve, download, verify, apt install,
 #                                     and write <dir>/SHA256SUMS for the cache
-#   ci-debs.sh install <dir>          warm path: verify <dir>/SHA256SUMS, dpkg -i the set
+#   ci-debs.sh install <dir>          warm path: verify <dir>/SHA256SUMS, install the set
 #   ci-debs.sh get <pool-path> <size> <hashtype:hex> <dest>
 #                                     fetch one pool file through the mirror list
 #                                     (what `fetch` calls per file; exposed for the test)
@@ -214,9 +214,21 @@ cmd_install() {
 	done < "$dir/SHA256SUMS"
 	[ "$(find "$dir" -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ')" = "$n" ] \
 		|| die "$dir holds .debs that SHA256SUMS does not list: refusing an unverified set"
-	echo "verified $n cached packages; installing with dpkg -i"
-	sudo env DEBIAN_FRONTEND=noninteractive dpkg -i "$dir"/*.deb \
-		|| die "dpkg -i of the cached package set failed"
+	# apt, not a bare `dpkg -i`: dpkg unpacks a set in argument order and refuses
+	# a package whose Pre-Depends sits later in the same set, where apt orders
+	# the set itself (measured: `dpkg -i` of this exact set failed on python3's
+	# pre-dependency). Local files need no package index, and --no-download makes
+	# any dependency the cached set lacks an error rather than a mirror fetch.
+	# They are installed from apt's own archive directory: with no index, apt
+	# looks a dependency's file up there, and fails with "Pathname to install is
+	# not absolute" when it is only in $dir.
+	echo "verified $n cached packages; installing them with apt-get --no-download"
+	local files=()
+	while read -r want f; do files+=("/var/cache/apt/archives/$f"); done < "$dir/SHA256SUMS"
+	sudo cp "$dir"/*.deb /var/cache/apt/archives/
+	sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-download --no-install-recommends \
+		-o DPkg::Lock::Timeout=120 "${files[@]}" \
+		|| die "apt-get install of the cached package set failed"
 }
 
 [ "$#" -ge 1 ] || die "usage: ci-debs.sh key|fetch|install|get ..."

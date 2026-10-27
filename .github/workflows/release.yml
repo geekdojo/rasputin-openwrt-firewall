@@ -581,7 +581,8 @@ jobs:
       #   - this cache needs neither. Its key (scripts/ci-debs.sh key) hashes the
       #     runner's whole installed package base, so cached .debs only ever land
       #     on the exact base apt resolved them against: the warm path is
-      #     `sha256sum -c` + `dpkg -i`, with no network and no apt index at all.
+      #     `sha256sum -c`, then apt installs the local files with --no-download:
+      #     no network and no apt index at all.
       # The cold path (a miss: new runner image, or 7 days unused) resolves with
       # apt but downloads each .deb itself with a speed FLOOR — under 100 kB/s
       # for 15 s and that mirror is dropped for the next — verifies size and
