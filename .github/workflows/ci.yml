@@ -24,8 +24,8 @@
 ##   scripts/test-dhcp-auto.sh, scripts/test-seed-scrub.sh,
 ##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh,
 ##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh,
-##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs) and
-##   scripts/test-agent-pin.sh.
+##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs),
+##   scripts/test-agent-pin.sh and scripts/test-ci-debs.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -137,6 +137,16 @@ jobs:
       - name: Agent pin tests
         timeout-minutes: 5
         run: ./scripts/test-agent-pin.sh
+      # scripts/ci-debs.sh puts QEMU + OVMF on the smoke-fw runner from
+      # actions/cache, and fetches them itself with a speed floor on a miss
+      # (2026-10-27: the mirror trickled at 37.6 kB/s and the smoke never ran).
+      # Its refusals are the point: a trickling, 404ing or lying mirror, a
+      # tampered cache. Run against local HTTP servers, no internet.
+      - name: CI package-cache tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_DPKG: "1"
+        run: ./scripts/test-ci-debs.sh
       # rasputin-tailscale gives tailscaled SSL_CERT_FILE and, on the way,
       # rewrites the box's global CA bundle to drop the Mesh CA an older agent
       # appended (geekdojo/geekdojo-brain#542). That bundle is what every TLS

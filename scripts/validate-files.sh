@@ -72,6 +72,7 @@ scripts/rasputin-release-tag-guard.sh
 scripts/release-target-guard.sh
 scripts/assemble-ab-image.sh
 scripts/agent-pin.sh
+scripts/ci-debs.sh
 scripts/validate-files.sh
 scripts/test-tailscale-init.sh
 scripts/test-dhcp-auto.sh
