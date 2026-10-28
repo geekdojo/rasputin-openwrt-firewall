@@ -1,0 +1,12 @@
+
+root@OpenWrt:~# [    7.116549] rasputin-kernel-match: MATCH running=6.12.112 #0 SMP Sat Oct 17 21:45:38 2026
+[    7.833553] 8021q: adding VLAN 0 to HW filter on device eth0
+[    7.835538] br-lan: port 1(eth0) entered blocking state
+[    7.836710] br-lan: port 1(eth0) entered disabled state
+[    7.837789] e1000e 0000:00:02.0 eth0: entered allmulticast mode
+[    7.839317] e1000e 0000:00:02.0 eth0: entered promiscuous mode
+[    8.049472] 8021q: adding VLAN 0 to HW filter on device eth1
+cho @@B:quiet-1595@@; dmesg -n 1; echo @@E:quiet-1595:$?@@
+-ash: cho: not found
+@@E:quiet-1595:0@@
+root@OpenWrt:~# 

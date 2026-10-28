@@ -272,23 +272,11 @@ shell() {
 	from=$(lines)
 	send ""
 	wait_for 'root@[^ ]+:' 60 "a root shell" "$from"
+	con_ready
 	run quiet 'dmesg -n 1' >/dev/null
 }
 
-# run <tag> <command> — run in the guest; prints its output; returns its status.
-# Usually called inside $(...), so the marker is made unique by the console's
-# current length, not by a counter that would only advance in the subshell.
-run() {
-	from=$(lines)
-	t="$1-$from"
-	send "echo @@B:$t@@; $2; echo @@E:$t:\$?@@"
-	wait_for "^@@E:$t:[0-9]+@@" "$CMD_DEADLINE" "the end of '$2'" "$from"
-	# Output only, with terminal colour codes stripped (the image's ip colours).
-	out=$(tail -n +"$from" "$LOG" | tr -d '\r' | sed -n "/^@@B:$t@@\$/,/^@@E:$t:/p" | sed 's/\x1b\[[0-9;]*m//g')
-	printf '%s\n' "$out" | sed '1d;$d'
-	rc=$(printf '%s\n' "$out" | sed -n "s/^@@E:$t:\([0-9]*\)@@\$/\1/p")
-	return "${rc:-1}"
-}
+# run <tag> <command>, and the console readiness probe: test/console.sh.
 
 # poweroff — sync and power off from the shell, and wait for QEMU to exit.
 poweroff_vm() {
