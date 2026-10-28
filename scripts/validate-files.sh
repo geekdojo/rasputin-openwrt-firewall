@@ -54,6 +54,7 @@ files/etc/hotplug.d/iface
 # Everything that is a shell script, executable or not.
 SYNTAX_GLOBS="
 scripts/*.sh
+test/*.sh
 files/etc/init.d/*
 files/etc/uci-defaults/*
 files/usr/lib/rasputin/*
@@ -71,6 +72,12 @@ scripts/rasputin-snort-rules-check.sh
 scripts/rasputin-release-tag-guard.sh
 scripts/release-target-guard.sh
 scripts/assemble-ab-image.sh
+scripts/kernel-id.sh
+scripts/fetch-legacy-kmods.sh
+scripts/check-bundle-kernel.sh
+test/update-smoke.sh
+image/legacy-kmods.sha256
+image/legacy-kernel-id
 scripts/agent-pin.sh
 scripts/validate-files.sh
 scripts/test-tailscale-init.sh
@@ -81,6 +88,8 @@ files/etc/init.d/rasputin-agent
 files/etc/init.d/rasputin-ipv4-only
 files/etc/init.d/rasputin-mgmt-harden
 files/etc/init.d/rasputin-trust-clean
+files/etc/init.d/rasputin-kernel-match
+files/usr/lib/rasputin/kernel-match.sh
 files/etc/init.d/rasputin-tailscale
 files/etc/init.d/rasputin-dhcp-auto
 files/etc/uci-defaults/99-rasputin

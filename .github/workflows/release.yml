@@ -11,10 +11,17 @@ name: release
 #   - detached CMS .sig signature, verified by rasputin-agent on the device
 #     (same YubiKey-rooted PKI as rasputin-os; see os-images/release-pipeline.md §3)
 #
+# Jobs: validate → build (incl. the bundle-kernel check) → smoke-fw → sign →
+# update-smoke (QEMU: published images updated to this build's signed .rootfs)
+# → publish. Publishing needs every one of them green. The update smoke exists
+# because nothing tested the update path, and dev.176 published a .rootfs that
+# booted on the previous release's kernel (geekdojo/geekdojo-brain#888).
+#
 # Triggers:
 #   - push of a CalVer tag (e.g. 2026.07.1 or 2026.07.1-dev.1)
-#                                       → validate + build + smoke + sign+release
-#   - manual dispatch (full_build=true) → validate + build + smoke (no release, bench)
+#                                       → validate + build + smoke + sign + update-smoke + publish
+#   - manual dispatch (full_build=true) → validate + build + smoke + sign + update-smoke
+#                                         (no release, bench)
 #   - manual dispatch (publish=true)    → build + sign + publish a dev release,
 #       versioned ${vars.RASPUTIN_VERSION}-dev.<run> (dev.N = run number). The
 #       release base comes from the org var RASPUTIN_VERSION, shared with
@@ -45,6 +52,10 @@ on:
         description: "Sign + publish this build as a dev release (versioned from org var RASPUTIN_VERSION). Implies full_build."
         type: boolean
         default: false
+      update_smoke_from:
+        description: "Extra published versions to run the update smoke FROM, comma-separated (one-off legs). 2026.10.3, the newest stable and the newest release always run."
+        type: string
+        default: ""
 
 permissions:
   contents: write   # create releases + upload assets
@@ -210,6 +221,46 @@ jobs:
       - name: Release target guard tests
         timeout-minutes: 5
         run: ./scripts/test-release-target-guard.sh
+
+      # The kernel-match guard decides, on a box that has just booted the wrong
+      # kernel, whether to reboot: wrong one way and a slot-A box loops, wrong
+      # the other and a slot-B box sits offline instead of falling back. Every
+      # row of that decision, under dash, bash and busybox ash
+      # (geekdojo/geekdojo-brain#888).
+      - name: Kernel-match guard tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-kernel-match.sh
+
+      # The kernel id the guard compares uname with, parsed from a bzImage
+      # header, including the 2026.10.3 field kernel's (#888).
+      - name: Kernel-id tests
+        timeout-minutes: 5
+        run: sh scripts/test-kernel-id.sh
+
+      # Real squashfs and GPT/FAT fixtures for the two build-time gates below.
+      # skip-if-present, through the shared ci-debs action, as above.
+      - name: Ensure squashfs-tools, mtools and sfdisk are available
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-mtools-fdisk
+          packages: squashfs-tools mtools fdisk
+          require: mksquashfs unsquashfs mcopy mformat sfdisk
+          skip-if-present: 'true'
+
+      # The build's bundle-kernel check must fail, naming the cause, on every
+      # way a release can carry the wrong kernel (#888, TC-888-14).
+      - name: Bundle-kernel check tests
+        timeout-minutes: 5
+        run: sh scripts/test-check-bundle-kernel.sh
+
+      # The legacy FAT modules are loaded into a field box's running kernel;
+      # their fetch must refuse a bad signature, sha or pin (#888, TC-888-32).
+      - name: Legacy-kmods fetch tests
+        timeout-minutes: 5
+        run: sh scripts/test-fetch-legacy-kmods.sh
 
   build:
     needs: validate
@@ -469,7 +520,18 @@ jobs:
         with:
           label: image-tools
           packages: genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin squashfs-tools
-          require: genimage mcopy sfdisk grub-mkimage grub-editenv unsquashfs
+          require: genimage mcopy sfdisk grub-mkimage grub-editenv unsquashfs mksquashfs
+
+      # The 6.12.94 FAT modules every field firewall's kernel needs to reach its
+      # ESP, from the signed 2026.10.3 release, verified against the root CA
+      # this image bakes and pinned by sha256 (image/legacy-kmods.sha256). The
+      # rootfs carries them so the kernel-match guard can repair a slot that an
+      # older agent installed (geekdojo/geekdojo-brain#888). Fails closed.
+      - name: Fetch the legacy FAT modules (2026.10.3)
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-legacy-kmods.sh files/etc/rasputin/trust/root-ca.pem legacy-kmods
 
       - name: Assemble A/B image (genimage post-process)
         timeout-minutes: 20
@@ -491,7 +553,20 @@ jobs:
             echo "::error::gunzip failed with rc=$rc on $src"; exit "$rc"
           fi
           img="${src%.gz}"
-          RASPUTIN_VERSION="$ver" ./scripts/assemble-ab-image.sh "$img" "$ver"
+          ./scripts/assemble-ab-image.sh "$img" "$ver" legacy-kmods
+
+      # The release carries its kernel everywhere it has to, and they agree:
+      # the rootfs's /boot (what an OTA installs), the ESP's vmlinuz-A and
+      # vmlinuz-B, /boot/kernel-id, the one /lib/modules tree, the grub.cfg,
+      # and the pinned legacy modules (geekdojo/geekdojo-brain#888). Before
+      # staging, so a release that would boot on the wrong kernel is never
+      # uploaded.
+      - name: Bundle carries its kernel
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          ver="${{ steps.ver.outputs.version }}"
+          ./scripts/check-bundle-kernel.sh "ab-out/rasputin-fw-n100-${ver}-ab.img.gz" "ab-out/rasputin-fw-n100-${ver}.rootfs"
 
       # Prove the baked rules parse under the Snort THIS image ships: extract
       # rootfs-0 from the A/B disk just assembled, chroot into it, apply the
@@ -604,39 +679,44 @@ jobs:
               -serial mon:stdio > /tmp/console.log 2>&1 ) &
           QPID=$!
           ok=0
+          # The banner, then the kernel-match guard's verdict: procd prints the
+          # console banner before rc reaches the guard at S11, so both are
+          # waited for (geekdojo/geekdojo-brain#888).
           for _ in $(seq 1 100); do
-            if grep -qE "Please press Enter to activate this console|BusyBox v[0-9]|procd: - init complete -" /tmp/console.log; then
+            if grep -qE "Please press Enter to activate this console|BusyBox v[0-9]|procd: - init complete -" /tmp/console.log \
+              && grep -q "rasputin-kernel-match: " /tmp/console.log; then
               ok=1; break
             fi
             sleep 2
           done
           kill "$QPID" 2>/dev/null || true
           echo "----- last 80 lines of console -----"; tail -80 /tmp/console.log || true
-          [ "$ok" = 1 ] || { echo "::error::firewall image did not reach OpenWrt banner in QEMU"; exit 1; }
+          [ "$ok" = 1 ] || { echo "::error::firewall image did not reach the OpenWrt banner and a kernel-match verdict in QEMU"; exit 1; }
           echo "OpenWrt firewall image booted in QEMU"
+          # The kernel-match guard (S11) ran before the banner, and a fresh
+          # image's slot A boots its own vmlinuz-A (geekdojo/geekdojo-brain#888).
+          grep -q "rasputin-kernel-match: MATCH" /tmp/console.log \
+            || { echo "::error::no 'rasputin-kernel-match: MATCH' on the console: slot A did not boot the kernel its rootfs was built with"; exit 1; }
+          grep "rasputin-kernel-match:" /tmp/console.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: smoke-fw-console
           path: /tmp/console.log
 
-  sign-and-release:
+  # Sign the build, and do NOT publish it: publish is its own job, after the
+  # update smoke. Runs on a tag, a publish=true dispatch, and a full_build
+  # dispatch, so a full_build exercises the whole gate a release faces. What a
+  # non-publishing run signs exists only as this run's artifacts, kept for one
+  # day (retention-days below): long enough for update-smoke and publish.
+  sign:
     needs: [build, smoke-fw]
-    # Publishes on a tag OR on a dispatch with publish=true (run-number dev release).
-    #
-    # ⚠️ `success() &&`, not `!cancelled() &&`, and the difference is the whole
-    # gate. GitHub implies success() ONLY when an `if:` contains no status-check
-    # function; `!cancelled()` IS one, so it REPLACED the implicit requirement
-    # that `needs` succeeded. The smoke boot has therefore never gated
-    # publishing — it merely had to finish, or not finish, either way.
-    #
-    # Caught 2026-08-19 the only way this ever gets caught: smoke-fw failed (its
-    # QEMU install timed out, so the image was never booted at all) and
-    # sign-and-release published 2026.08.4-dev.93 twenty-seven seconds later,
-    # signed and into the dev channel, where the control plane offered it as an
-    # update to the firewall. A gate that reads like a gate and is not one is
-    # worse than no gate, because the release notes say it booted.
-    if: ${{ success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
+    # ⚠️ An explicit result check, not `!cancelled()` alone. GitHub implies
+    # success() ONLY when an `if:` contains no status-check function, and
+    # `!cancelled()` IS one, so on its own it replaced the requirement that
+    # `needs` succeeded and the smoke boot never gated publishing (2026-08-19:
+    # 2026.08.4-dev.93 published 27 s after a red smoke-fw).
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.smoke-fw.result == 'success' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     # The release signing credential lives in this repository's `signing`
     # ENVIRONMENT, not in repository- or organisation-level secrets
@@ -646,20 +726,13 @@ jobs:
     # rather than signing with something weaker.
     environment: signing
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      channel: ${{ steps.ver.outputs.channel }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
-
-      # The exact commit this run built. Every job's checkout (build included)
-      # takes the run's github.sha, so this HEAD is the tree the image came
-      # from. The release tag must land HERE, not on whatever main points at
-      # when the publish step runs: with no explicit target, GitHub creates a
-      # new tag from the default branch at publish time, so a PR merged mid-run
-      # tags a commit the image was never built from (2026.08.4-dev.95: built
-      # from 3448796, tagged d236520).
-      - name: Record built commit
-        id: src
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Compute version
         id: ver
@@ -670,7 +743,7 @@ jobs:
             VERSION="${GITHUB_REF_NAME}"
           else
             if [ -z "${TARGET_VERSION}" ]; then
-              echo "::error::org var RASPUTIN_VERSION is unset — cannot publish a dev release"; exit 1
+              echo "::error::org var RASPUTIN_VERSION is unset — cannot version a dev build"; exit 1
             fi
             VERSION="${TARGET_VERSION}-dev.${GITHUB_RUN_NUMBER}"
           fi
@@ -697,9 +770,9 @@ jobs:
       # is exactly how leaf-002 shipped: a perfect chain carrying codeSigning
       # and the release OID but no emailProtection, which every deployed board
       # refuses, because OpenSSL's CMS_verify defaults to the S/MIME purpose
-      # and nothing in the field overrides it. rasputin-os caught that in its
-      # own preflight; this repository would have signed with it and published
-      # a firewall image no node could install.
+      # and nothing in the field overrides it. The action's preflight also
+      # makes the release-OID demand (geekdojo/geekdojo-brain#526), matched as
+      # a whole token (#474).
       - name: Stage and preflight the signing credential
         id: mat
         uses: geekdojo/.github/.github/actions/rasputin-sign@e94e742453c1a1d0d3426d1b541bd5f1a82f3c4a
@@ -708,15 +781,6 @@ jobs:
           leaf-key:  ${{ secrets.RASPUTIN_LEAF_KEY }}
           leaf-cert: ${{ secrets.RASPUTIN_LEAF_CERT }}
           root-ca:   ${{ vars.RASPUTIN_ROOT_CA_PEM }}
-
-      # The inline release-OID check that landed on main here
-      # (geekdojo/geekdojo-brain#526) is not dropped, it MOVED. The shared
-      # action's preflight makes the same demand of the leaf, matched as a
-      # whole token rather than a substring for the same reason (#474), and
-      # alongside it the smimesign purpose every deployed board enforces and
-      # RAUC's codesign semantics -- neither of which this repository was
-      # checking at all. One copy, with its own tests in geekdojo/.github, is
-      # the point of the action.
 
       - name: CMS-sign images + emit manifest.json
         id: sign
@@ -730,6 +794,8 @@ jobs:
           LEAF: ${{ steps.mat.outputs.leaf }}
           INTERMEDIATE: ${{ steps.mat.outputs.intermediate }}
           KEY: ${{ steps.mat.outputs.key }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
         run: |
           set -eu
           mkdir -p release-out
@@ -739,7 +805,7 @@ jobs:
           # the current build's manifest.
           cp artifacts/*.sbom.txt release-out/ 2>/dev/null || true
           cp artifacts/*.rootfs.version release-out/ 2>/dev/null || true
-          ver="${{ steps.ver.outputs.version }}"
+          ver="$VERSION"
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
           # Detached CMS signature, DER format. The rasputin-agent verifies with:
@@ -783,7 +849,7 @@ jobs:
           rsigsz=$(stat -c%s   "release-out/${rootfs}.sig")
 
           jq -n \
-            --arg version "$ver" --arg channel "${{ steps.ver.outputs.channel }}" \
+            --arg version "$ver" --arg channel "$CHANNEL" \
             --arg sku fw-n100 --arg arch amd64 --arg compatible rasputin-fw-n100 \
             --arg image "$disk"   --arg isha "$dsha" --argjson isz "$dsz" \
             --arg isig "${disk}.sig"   --arg isigsha "$dsigsha" --argjson isigsz "$dsigsz" \
@@ -851,10 +917,212 @@ jobs:
         with:
           mode: cleanup
 
+      # Two artifacts, so each update-smoke leg downloads the signed .rootfs it
+      # installs without the rest. One day: see the job header.
+      - name: Upload the signed rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rootfs
+          path: |
+            release-out/*.rootfs
+            release-out/*.rootfs.sig
+            release-out/*.rootfs.version
+          retention-days: 1
+      - name: Upload the rest of the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rest
+          path: |
+            release-out/*.img.gz
+            release-out/*.img.gz.sig
+            release-out/*.sbom.txt
+            release-out/manifest.json
+            release-out/manifest.json.sig
+          retention-days: 1
+
+  # Which published images the update smoke starts from, and which legs run
+  # from each (test/update-smoke.sh). 2026.10.3 ALWAYS runs, with every field
+  # leg: it is the field layout (one shared kernel on the ESP, an agent that
+  # copies no kernel) that every pre-#888 box is on, and it must stay a FROM
+  # after a post-fix stable publishes (F-888-03). The newest stable, the newest
+  # release and any update_smoke_from version get the generic leg. The
+  # fresh-image rollback leg needs no FROM. Its own job, so the matrix is
+  # data, decided once.
+  update-plan:
+    needs: validate
+    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Pick the published images to update from
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A dispatch input is free text: through the environment, never into
+          # the script text, and every entry is validated below.
+          EXTRA: ${{ inputs.update_smoke_from }}
+          FIELD_BASE: "2026.10.3"
+        run: |
+          set -eu
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+            --json tagName,isDraft,isPrerelease,publishedAt > releases.json
+          # Newest first, never this run's own tag.
+          newest=$(jq -r '[.[] | select(.isDraft | not)] | sort_by(.publishedAt) | reverse | .[].tagName' releases.json \
+            | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          newest_stable=$(jq -r '[.[] | select((.isDraft | not) and (.isPrerelease | not))] | sort_by(.publishedAt) | reverse | .[].tagName' releases.json \
+            | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          test -n "$newest" || { echo "::error::no published release to update from"; exit 1; }
+          # One version per line; never word-split the input.
+          printf '%s\n' "$newest" "$newest_stable" > bases.txt
+          printf '%s\n' "$EXTRA" | tr ',' '\n' | tr -d ' \t' | while IFS= read -r b; do
+            [ -n "$b" ] || continue
+            printf '%s\n' "$b" | grep -Eqx '[0-9]{4}\.[0-9]{2}\.[0-9]+(-dev\.[0-9]+)?' \
+              || { echo "::error::update_smoke_from entry '$b' is not a CalVer release version"; exit 1; }
+            printf '%s\n' "$b" >> bases.txt
+          done
+          { awk 'NF && !seen[$0]++' bases.txt | grep -vxF "$FIELD_BASE" || true; } > others.txt
+          matrix=$(jq -Rnc --arg field "$FIELD_BASE" '
+            [inputs] as $other | {include: (
+              [{leg: "fresh-rollback", base: ""}]
+              + (["field-new-b", "field-new-a", "old-b", "old-a", "chain", "repair-twice"]
+                  | map({leg: ., base: $field}))
+              + ($other | map({leg: "generic", base: .}))
+            )}' < others.txt)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+  # Update a PUBLISHED image to this build's signed .rootfs, in QEMU, and prove
+  # every slot then boots the kernel its rootfs was built with: through the new
+  # agent's install, through an old agent's install and the kernel-match
+  # guard's self-repair, and through each fallback (test/update-smoke.sh; read
+  # it for what each leg asserts and what it cannot prove). A red leg BLOCKS
+  # publish (geekdojo/geekdojo-brain#888).
+  update-smoke:
+    needs: [build, sign, update-plan]
+    if: ${{ !cancelled() && needs.sign.result == 'success' && needs.update-plan.result == 'success' }}
+    name: update-smoke (${{ matrix.leg }} ${{ matrix.base }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.update-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      # Hosted runners expose /dev/kvm to root only; the harness uses KVM when
+      # it can open it and TCG otherwise.
+      - name: Let the runner user open /dev/kvm
+        timeout-minutes: 2
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+          ls -l /dev/kvm || echo "no /dev/kvm: the smoke runs on TCG"
+      # Through the shared ci-debs action, bounded, as in smoke-fw above.
+      - name: Install QEMU + image tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: update-smoke-fw
+          packages: qemu-system-x86 ovmf mtools fdisk grub-common squashfs-tools e2fsprogs jq
+          require: qemu-system-x86_64 mcopy sfdisk grub-editenv unsquashfs mkfs.ext4 jq
+      # Three 2.7 GB disk images (this build's, the FROM, and the working copy).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          df -h /
+      - uses: actions/download-artifact@v4
+        with:
+          name: fw-n100-${{ needs.sign.outputs.version }}
+          path: new
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-rootfs
+          path: signed
+      - name: Decompress this build's image
+        env:
+          VERSION: ${{ needs.sign.outputs.version }}
+        run: |
+          set -eu
+          rc=0
+          gunzip -f "new/rasputin-fw-n100-${VERSION}-ab.img.gz" || rc=$?
+          # OpenWrt-derived images carry trailing NUL padding: gunzip exits 2.
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || { echo "::error::gunzip failed with rc=$rc"; exit 1; }
+          rm -f new/*.rootfs
+      - name: Fetch the published image to update from
+        if: ${{ matrix.base != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ matrix.base }}
+        run: |
+          set -eu
+          mkdir -p old
+          gh release download "$BASE" --repo "$GITHUB_REPOSITORY" \
+            --pattern "rasputin-fw-n100-${BASE}-ab.img.gz" --dir old
+          rc=0
+          gunzip -f "old/rasputin-fw-n100-${BASE}-ab.img.gz" || rc=$?
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || { echo "::error::gunzip failed with rc=$rc"; exit 1; }
+          df -h .
+      - name: Update in QEMU
+        env:
+          LEG: ${{ matrix.leg }}
+          BASE: ${{ matrix.base }}
+          VERSION: ${{ needs.sign.outputs.version }}
+        run: |
+          set -eu
+          set -- "$LEG" "new/rasputin-fw-n100-${VERSION}-ab.img" \
+            "signed/rasputin-fw-n100-${VERSION}.rootfs" "$VERSION"
+          [ -z "$BASE" ] || set -- "$@" "old/rasputin-fw-n100-${BASE}-ab.img"
+          test/update-smoke.sh "$@"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-smoke-${{ matrix.leg }}-${{ matrix.base || 'fresh' }}-console
+          path: /tmp/update-smoke/*/console.log
+
+  # Publish. Only a tag or publish=true gets here, and only with every gate
+  # green: the build (which includes the bundle-kernel check), the boot smoke
+  # (through sign), the signature, and every update-smoke leg.
+  publish:
+    needs: [build, sign, update-smoke]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sign.result == 'success' && needs.update-smoke.result == 'success' && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The exact commit this run built. Every job's checkout (build included)
+      # takes the run's github.sha, so this HEAD is the tree the image came
+      # from. The release tag must land HERE, not on whatever main points at
+      # when the publish step runs: with no explicit target, GitHub creates a
+      # new tag from the default branch at publish time, so a PR merged mid-run
+      # tags a commit the image was never built from (2026.08.4-dev.95: built
+      # from 3448796, tagged d236520).
+      - name: Record built commit
+        id: src
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-out
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.version }}
+          TAG: ${{ needs.sign.outputs.version }}
+          CHANNEL: ${{ needs.sign.outputs.channel }}
+          PRERELEASE: ${{ needs.sign.outputs.prerelease }}
           # --target pins a NEW tag (dispatch-publish) to the built commit. On a
           # tag push the tag already exists and GitHub ignores target_commitish,
           # so that path is unchanged — and there the checked-out commit is the
@@ -864,7 +1132,7 @@ jobs:
         run: |
           set -eu
           PRERELEASE_FLAG=""
-          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+          if [ "$PRERELEASE" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
           fi
 
@@ -884,8 +1152,8 @@ jobs:
 
           gh release create "$TAG" \
             --target "$TARGET_SHA" \
-            --title "Rasputin OpenWrt Firewall ${{ steps.ver.outputs.version }}" \
-            --notes "Channel: \`${{ steps.ver.outputs.channel }}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (https://rasputin.geekdojo.com/rasputin-root-ca.pem) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile rasputin-root-ca.pem\`; verify commands: https://rasputin.geekdojo.com/docs/agents/. Per-asset SHA-256 in \`manifest.json\`, which is itself signed: \`manifest.json.sig\` is a detached DER CMS signature over it, verified the same way. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
+            --title "Rasputin OpenWrt Firewall ${TAG}" \
+            --notes "Channel: \`${CHANNEL}\`. Artifacts: \`*-ab.img.gz\` is the full A/B disk (INITIAL FLASH — write to the whole disk); \`*.rootfs\` is the bare rootfs squashfs (the OTA artifact the control plane pushes into the inactive slot). Verify signatures with the public root CA (https://rasputin.geekdojo.com/rasputin-root-ca.pem) — \`openssl cms -verify -binary -inform DER -in <file>.sig -content <file> -CAfile rasputin-root-ca.pem\`; verify commands: https://rasputin.geekdojo.com/docs/agents/. Per-asset SHA-256 in \`manifest.json\`, which is itself signed: \`manifest.json.sig\` is a detached DER CMS signature over it, verified the same way. The \`*.sbom.txt\` asset is the package manifest (canary workflow uses this to detect upstream drift)." \
             $PRERELEASE_FLAG \
             release-out/*
 
@@ -910,6 +1178,7 @@ jobs:
       - name: Attempt to lock release as immutable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.sign.outputs.version }}
         run: |
           set -eu
           # Process discipline: once a tag is published, it MUST NOT be
@@ -933,13 +1202,13 @@ jobs:
           # primary protection regardless. Tag protection rules
           # (Settings → Tags) are a more reliable backstop on
           # this repo/org tier.
-          db_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/${{ steps.ver.outputs.version }}" --jq .id)
+          db_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/${TAG}" --jq .id)
           result=$(gh api "repos/$GITHUB_REPOSITORY/releases/$db_id" \
                      -X PATCH \
                      -f immutable=true \
                      --jq '.immutable')
           if [ "$result" = "true" ]; then
-            echo "::notice::release ${{ steps.ver.outputs.version }} locked immutable=true"
+            echo "::notice::release ${TAG} locked immutable=true"
           else
             echo "::warning::PATCH immutable=true did not take effect on this release (immutable=$result). The feature likely needs enablement at Settings → General → Releases or via org-tier toggle. Process discipline + Settings → Tags protection rules are the working backstop until then."
           fi

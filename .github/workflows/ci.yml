@@ -26,6 +26,9 @@
 ##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh,
 ##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs),
 ##   and scripts/test-agent-pin.sh.
+##   And the per-slot kernel gates (geekdojo/geekdojo-brain#888):
+##   scripts/test-kernel-match.sh, scripts/test-kernel-id.sh,
+##   scripts/test-check-bundle-kernel.sh and scripts/test-fetch-legacy-kmods.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -212,6 +215,46 @@ jobs:
       - name: Release target guard tests
         timeout-minutes: 5
         run: ./scripts/test-release-target-guard.sh
+
+      # The kernel-match guard decides, on a box that has just booted the wrong
+      # kernel, whether to reboot: wrong one way and a slot-A box loops, wrong
+      # the other and a slot-B box sits offline instead of falling back. Every
+      # row of that decision, under dash, bash and busybox ash
+      # (geekdojo/geekdojo-brain#888).
+      - name: Kernel-match guard tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-kernel-match.sh
+
+      # The kernel id the guard compares uname with, parsed from a bzImage
+      # header, including the 2026.10.3 field kernel's (#888).
+      - name: Kernel-id tests
+        timeout-minutes: 5
+        run: sh scripts/test-kernel-id.sh
+
+      # Real squashfs and GPT/FAT fixtures for the two build-time gates below.
+      # skip-if-present, through the shared ci-debs action, as above.
+      - name: Ensure squashfs-tools, mtools and sfdisk are available
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-mtools-fdisk
+          packages: squashfs-tools mtools fdisk
+          require: mksquashfs unsquashfs mcopy mformat sfdisk
+          skip-if-present: 'true'
+
+      # The build's bundle-kernel check must fail, naming the cause, on every
+      # way a release can carry the wrong kernel (#888, TC-888-14).
+      - name: Bundle-kernel check tests
+        timeout-minutes: 5
+        run: sh scripts/test-check-bundle-kernel.sh
+
+      # The legacy FAT modules are loaded into a field box's running kernel;
+      # their fetch must refuse a bad signature, sha or pin (#888, TC-888-32).
+      - name: Legacy-kmods fetch tests
+        timeout-minutes: 5
+        run: sh scripts/test-fetch-legacy-kmods.sh
 
   apply-seed:
     name: Seed to agent environment (functional)
