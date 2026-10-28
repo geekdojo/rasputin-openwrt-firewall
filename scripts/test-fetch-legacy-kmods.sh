@@ -15,6 +15,10 @@
 #   rootfs-sig  .rootfs.sig is signed by a key the CA never issued
 #   ko-sha      a module's sha256 differs from its pin
 #   no-ca       an empty root CA (a build with RASPUTIN_ROOT_CA_PEM unset)
+#   expired     signed while the leaf was valid, run after it expired: exits 0,
+#               because it verifies at the signing time (F-888-21); a plain
+#               today-check of the same signature is shown to fail
+#   no-sigtime  a signature with no signingTime is refused
 #
 # Each refusal must exit non-zero AND name the offending file. A fixture
 # cannot carry the real 2026.10.3 modules, so the pins are a fixture too
@@ -61,6 +65,30 @@ q openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=
 q openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out leaf.pem -days 2 \
 	-extfile ext.cnf -extensions leaf
 q openssl req -x509 -newkey rsa:2048 -nodes -keyout stranger.key -out stranger.pem -days 2 -subj "/CN=stranger"
+
+# The CA database for a short-lived leaf, issued by the same root through
+# `openssl ca`, which sets an exact end date on every OpenSSL the runners have.
+# The leaf itself is issued just before it signs (the "expired" case).
+mkdir -p ca.db
+: > ca.db/index.txt
+cat > ca.cnf <<EOF
+[ca]
+default_ca = fx
+[fx]
+database = $W/ca.db/index.txt
+new_certs_dir = $W/ca.db
+serial = $W/ca.db/serial
+certificate = $W/ca.pem
+private_key = $W/ca.key
+default_md = sha256
+policy = any
+unique_subject = no
+copy_extensions = none
+[any]
+commonName = supplied
+EOF
+echo 01 > ca.db/serial
+q openssl req -newkey rsa:2048 -nodes -keyout short.key -out short.csr -subj "/CN=fixture short-lived leaf"
 
 sign() { # sign <file> <cert> <key>
 	q openssl cms -sign -binary -in "$1" -signer "$2" -inkey "$3" -outform DER -out "$1.sig"
@@ -138,6 +166,38 @@ refused "a .ko whose sha differs from the pin is refused" "$W/ko-sha" "vfat.ko h
 # no root CA
 : > "$W/empty.pem"
 refused "an empty root CA is refused" "$W/good" "is missing or empty" "$W/empty.pem"
+
+# no signingTime: -noattr leaves out every signed attribute
+build_release "$W/no-sigtime"
+q openssl cms -sign -noattr -binary -in "$W/no-sigtime/manifest.json" -signer "$W/leaf.pem" \
+	-inkey "$W/leaf.key" -outform DER -out "$W/no-sigtime/manifest.json.sig"
+refused "a signature with no signingTime is refused" "$W/no-sigtime" "manifest.json.sig carries no signingTime"
+
+# signed by the short-lived leaf while it was valid, verified after it expired
+# (F-888-21). The wait is for the fact itself, the leaf's expiry, with a bound.
+build_release "$W/expired"
+q openssl ca -batch -config "$W/ca.cnf" -in "$W/short.csr" -out "$W/short.pem" -notext \
+	-startdate "$(jq -rn 'now - 3600 | strftime("%Y%m%d%H%M%SZ")')" \
+	-enddate "$(jq -rn 'now + 5 | strftime("%Y%m%d%H%M%SZ")')" \
+	-extfile "$W/ext.cnf" -extensions leaf
+sign "$W/expired/manifest.json" "$W/short.pem" "$W/short.key"
+sign "$W/expired/$ROOTFS" "$W/short.pem" "$W/short.key"
+n=0
+while openssl x509 -checkend 0 -noout -in "$W/short.pem" >/dev/null 2>&1; do
+	[ "$n" -lt 30 ] || { echo "test-fetch-legacy-kmods: the short-lived leaf never expired" >&2; exit 1; }
+	n=$((n + 1)); sleep 1
+done
+if openssl cms -verify -binary -inform DER -in "$W/expired/manifest.json.sig" \
+	-content "$W/expired/manifest.json" -CAfile "$W/ca.pem" -out /dev/null >/dev/null 2>&1; then
+	no "an expired leaf fails a today-check (the fixture's premise)" "a today-check of the expired leaf's signature passed"
+else
+	ok "an expired leaf fails a today-check (the fixture's premise)"
+fi
+if run "$W/expired" && grep -qF "manifest.json.sig verified (at its signing time" "$W/expired/out.txt"; then
+	ok "a release signed before its leaf expired still verifies at its signing time"
+else
+	no "a release signed before its leaf expired still verifies at its signing time" "$(cat "$W/expired/out.txt")"
+fi
 
 printf '\nfetch-legacy-kmods: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

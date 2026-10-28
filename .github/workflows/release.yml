@@ -257,10 +257,19 @@ jobs:
         run: sh scripts/test-check-bundle-kernel.sh
 
       # The legacy FAT modules are loaded into a field box's running kernel;
-      # their fetch must refuse a bad signature, sha or pin (#888, TC-888-32).
+      # their fetch must refuse a bad signature, sha or pin (#888, TC-888-32),
+      # and must verify at the signing time, so the leaf's expiry cannot fail
+      # the build (F-888-21).
       - name: Legacy-kmods fetch tests
         timeout-minutes: 5
         run: sh scripts/test-fetch-legacy-kmods.sh
+
+      # The update smoke's console searches, on a saved CI console, under
+      # pipefail with SIGPIPE ignored as on the runner: a line that is there
+      # must be found (#888, F-888-24).
+      - name: Update-smoke console tests
+        timeout-minutes: 5
+        run: bash scripts/test-update-smoke-console.sh
 
   build:
     needs: validate

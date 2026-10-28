@@ -76,6 +76,8 @@ scripts/kernel-id.sh
 scripts/fetch-legacy-kmods.sh
 scripts/check-bundle-kernel.sh
 test/update-smoke.sh
+test/console.sh
+test/fixtures/update-smoke-generic-console.log
 image/legacy-kmods.sha256
 image/legacy-kernel-id
 scripts/agent-pin.sh

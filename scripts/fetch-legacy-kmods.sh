@@ -23,7 +23,8 @@
 #   It downloads the published 2026.10.3 manifest.json, manifest.json.sig,
 #   .rootfs and .rootfs.sig, and refuses (exit 1, naming the file) unless:
 #     - both signatures verify against <root-ca.pem> (the root CA this build
-#       bakes into the image), with the published verify command;
+#       bakes into the image), with the published verify command, at their
+#       signing time;
 #     - the .rootfs sha256 equals the signed manifest's rootfsSha256;
 #     - each module's sha256 equals image/legacy-kmods.sha256.
 #   The pins are the real gate: a published release can be re-signed, and the
@@ -82,13 +83,30 @@ else
 	done
 fi
 
+# signed_at <file> — the signature's signingTime, as a Unix epoch. It is a
+# signed attribute, so the verify below also proves it was not altered.
+signed_at() {
+	# To a file first: awk stops reading at its match, and under pipefail the
+	# writer's broken pipe would fail the pipeline.
+	openssl cms -cmsout -print -inform DER -in "$DL/$1.sig" > "$WORK/cms.txt" 2>/dev/null \
+		|| die "$1.sig is not a readable CMS signature."
+	t=$(awk '/object: signingTime/ {f = 1; next} f && /TIME:/ {sub(/.*TIME:/, ""); print; exit}' "$WORK/cms.txt")
+	[ -n "$t" ] || die "$1.sig carries no signingTime, so there is no time to verify it at."
+	jq -rn --arg t "$t" '$t | gsub(" +"; " ") | strptime("%b %d %H:%M:%S %Y GMT") | mktime' 2>/dev/null \
+		|| die "$1.sig has a signingTime '$t' this script cannot read."
+}
+
 # The published verify command (README, release notes): no -purpose, so the
-# S/MIME default every deployed agent applies.
+# S/MIME default every deployed agent applies. It checks the certificates at
+# the time the release was signed, not today (F-888-21): these signatures never
+# change, and the leaf that made them expires (leaf-003, 2028-08-20), after
+# which a today-check would fail every build. The sha256 pins stay the gate.
 verify_sig() {
+	at=$(signed_at "$1") || exit 1
 	openssl cms -verify -binary -inform DER -in "$DL/$1.sig" -content "$DL/$1" \
-		-CAfile "$CA" -out /dev/null 2>"$WORK/cms.err" \
+		-CAfile "$CA" -attime "$at" -out /dev/null 2>"$WORK/cms.err" \
 		|| die "$1.sig does not verify against $CA: $(tr '\n' ' ' < "$WORK/cms.err")"
-	echo "fetch-legacy-kmods: $1.sig verified"
+	echo "fetch-legacy-kmods: $1.sig verified (at its signing time, epoch $at)"
 }
 verify_sig manifest.json
 verify_sig "$ROOTFS"

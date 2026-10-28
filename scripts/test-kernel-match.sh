@@ -167,7 +167,15 @@ for shell in $TEST_SHELLS; do
 
 	for s in A B; do
 		run_case "$shell" "rc0-$s" "$LEGACY_ID" build "$s" present 0
-		expect "repair exit 0 on $s: sync then reboot -f" "rebooting into its own kernel" 1 1
+		expect "repair exit 0 on $s: sync then reboot -f" \
+			"<11>rasputin-kernel-match: repair-slot-boot finished on slot $s (outcome in the agent line above); rebooting: GRUB boots slot $s on its own kernel if it was repaired, the other slot if it was marked bad" 1 1
+		# F-888-26: exit 0 is Fallback as well as Repaired, so the line must not
+		# promise this slot's own kernel.
+		if grep -qF "rebooting into its own kernel" "$W/case/kmsg"; then
+			no "repair exit 0 on $s: the reboot line holds for Fallback too" "kmsg: $(cat "$W/case/kmsg")"
+		else
+			ok "repair exit 0 on $s: the reboot line holds for Fallback too"
+		fi
 	done
 
 	run_case "$shell" rc3-B "$LEGACY_ID" build B present 3
