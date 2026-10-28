@@ -15,6 +15,10 @@
 # line depends on scheduling (whether tr is still writing when grep exits), so
 # a case asserting the miss is itself flaky (F-888-28).
 #
+# The lost-input cases (F-888-29) drive the readiness probe and run() over a
+# simulated guest: send appends to a console log what the guest printed in
+# release run 40633612615 (the second fixture), so they are deterministic.
+#
 # Usage: bash scripts/test-update-smoke-console.sh
 trap '' PIPE
 set -euo pipefail
@@ -70,6 +74,78 @@ if [ -z "$got" ]; then
 	ok "con_first prints nothing, and does not fail, when nothing matches"
 else
 	no "con_first prints nothing when nothing matches" "printed '$got'"
+fi
+
+# --- lost console input (F-888-29) ---------------------------------------------
+LOST="$ROOT/test/fixtures/update-smoke-lost-input-console.log"
+[ -s "$LOST" ] || { echo "test-update-smoke-console: no fixture at $LOST" >&2; exit 1; }
+
+if con_has "$LOST" 1 '^@@E:quiet-1595:[0-9]+@@' && ! con_began "$LOST" 1 quiet-1595; then
+	ok "con_began reports the start lost in release run 40633612615's console"
+else
+	no "con_began reports the start lost in the run's console" "end marker missing, or a begin marker found"
+fi
+
+# A simulated guest. $W/lose holds how many more lines lose their first byte;
+# a lost line prints what the run's console printed (the fixture's last four
+# lines, tag swapped); an intact one prints its begin marker, then its end
+# marker with status 3. The rest is the caller I/O console.sh documents.
+LOG="$W/console.log"
+CMD_DEADLINE=60
+lines() { wc -l < "$LOG" | tr -d ' '; }
+say() { printf 'say: %s\n' "$*"; }
+die() { printf 'FAIL %s\n' "$*" >&2; exit 1; }
+wait_for() { con_has "$LOG" "${4:-1}" "$1" || die "$3 did not appear"; }
+send() {
+	tag=$(printf '%s\n' "$1" | sed -n 's/^echo @@B:\([^@]*\)@@;.*/\1/p')
+	n=$(cat "$W/lose")
+	if [ "$n" -gt 0 ]; then
+		echo $((n - 1)) > "$W/lose"
+		printf '\n'; tail -n 4 "$LOST" | sed "s/quiet-1595/$tag/g"
+	else
+		printf '%s\r\n@@B:%s@@\r\n@@E:%s:3@@\r\nroot@OpenWrt:~# ' "$1" "$tag" "$tag"
+	fi >> "$LOG"
+}
+fresh() { head -n 8 "$LOST" > "$LOG"; echo "$1" > "$W/lose"; }
+
+fresh 1
+if ( con_ready ) > "$W/out" 2> "$W/err" \
+	&& [ "$(grep -c '^cho @@B:ready-' "$LOG")" = 1 ] \
+	&& [ "$(grep -c '^@@B:ready-' "$LOG")" = 1 ] \
+	&& grep -q 'probing again' "$W/out"; then
+	ok "the readiness probe is sent again after it loses its start, and returns once one arrives intact"
+else
+	no "the readiness probe is sent again after a lost start" "out: $(cat "$W/out") err: $(cat "$W/err")"
+fi
+
+fresh 1
+CMD_DEADLINE=0
+if ( con_ready ) > "$W/out" 2> "$W/err"; then
+	no "the readiness probe stops at its deadline" "it returned 0 with every probe lost"
+elif grep -q '^FAIL lost console input' "$W/err" && [ "$(grep -c '^cho @@B:ready-' "$LOG")" = 1 ]; then
+	ok "the readiness probe stops at its deadline with a lost-console-input FAIL"
+else
+	no "the readiness probe stops at its deadline" "err: $(cat "$W/err")"
+fi
+CMD_DEADLINE=60
+
+fresh 1
+if ( run quiet 'dmesg -n 1' ) > "$W/out" 2> "$W/err"; then
+	no "run() fails on lost input" "it returned 0"
+elif grep -q "^FAIL lost console input: the guest did not receive the start of 'dmesg -n 1'" "$W/err" \
+	&& [ "$(grep -c 'dmesg -n 1' "$LOG")" = 1 ]; then
+	ok "run() fails on lost input with an explicit FAIL, and does not resend the command"
+else
+	no "run() fails on lost input with an explicit FAIL" "err: $(cat "$W/err")"
+fi
+
+fresh 0
+rc=0
+got=$( run uname 'uname -r' ) || rc=$?
+if [ "$rc" = 3 ] && [ -z "$got" ]; then
+	ok "run() returns the guest's status when the input arrives intact"
+else
+	no "run() returns the guest's status" "rc $rc, output '$got'"
 fi
 
 printf '\nupdate-smoke-console: %d passed, %d failed\n' "$pass" "$fail"
