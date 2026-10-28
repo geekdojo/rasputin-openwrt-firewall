@@ -14,8 +14,8 @@
 #                (every leg but fresh-rollback)
 #
 # WHY. dev.176 moved the kernel from 6.12.94 to 6.12.112, and an OTA'd firewall
-# booted the new rootfs on the old shared kernel: no NIC driver, no ext4
-# /overlay, offline. The boot smoke boots a fresh image on its own kernel, so
+# booted the new rootfs on the old shared kernel: on the field hardware, no NIC
+# driver, no ext4 /overlay, offline. The boot smoke boots a fresh image on its own kernel, so
 # nothing tested the update path. This does, on the real published image, the
 # real GRUB and grub.cfg, and this build's real signed artifact and agent.
 #
@@ -85,6 +85,10 @@ BUNDLE_ID=fw-update-smoke
 
 LOG="$WORK/console.log"
 export MTOOLS_SKIP_CHECK=1
+# Console searches go through a snapshot file, never `... | grep -q` (F-888-24).
+CON_SNAP="$WORK/console.snap"
+# shellcheck source=test/console.sh
+. "$REPO_ROOT/test/console.sh"
 
 say() { printf 'update-smoke[%s]: %s\n' "$LEG" "$*"; }
 die() {
@@ -104,8 +108,11 @@ mkdir -p "$WORK"
 for f in "$NEW_IMG" "$NEW_ROOTFS" "$NEW_ROOTFS.sig" "$NEW_ROOTFS.version"; do
 	[ -s "$f" ] || die "missing input $f"
 done
-NEW_ID="$(unsquashfs -cat "$NEW_ROOTFS" boot/kernel-id 2>/dev/null | head -n 1)" \
+# To a file, then head: head on a pipe would stop reading and, under pipefail,
+# fail on unsquashfs's broken pipe (F-888-24).
+unsquashfs -cat "$NEW_ROOTFS" boot/kernel-id > "$WORK/new-kernel-id" 2>/dev/null \
 	|| die "this build's .rootfs has no /boot/kernel-id"
+NEW_ID="$(head -n 1 "$WORK/new-kernel-id")"
 unsquashfs -cat "$NEW_ROOTFS" boot/vmlinuz > "$WORK/new-vmlinuz" 2>/dev/null \
 	|| die "this build's .rootfs has no /boot/vmlinuz"
 NEW_KSHA="$(sha256sum "$WORK/new-vmlinuz" | awk '{print $1}')"
@@ -233,7 +240,7 @@ wait_for() {
 	re=$1 deadline=$2 what=$3 from=${4:-1}
 	end=$(( $(date +%s) + deadline ))
 	while :; do
-		tail -n +"$from" "$LOG" | tr -d '\r' | grep -qE -- "$re" && return 0
+		con_has "$LOG" "$from" "$re" && return 0
 		alive || die "QEMU exited before $what"
 		[ "$(date +%s)" -lt "$end" ] || die "$what did not appear within ${deadline}s"
 		sleep 1
@@ -253,7 +260,7 @@ boot_n() {
 		sleep 1
 	done
 	BOOT_FROM=$(tr -d '\r' < "$LOG" | grep -n 'Kernel command line:' | sed -n "${n}p" | cut -d: -f1)
-	got=$(tail -n +"$BOOT_FROM" "$LOG" | tr -d '\r' | grep -m1 'Kernel command line:' | sed -n 's/.*rasputin\.slot=\([AB]\).*/\1/p')
+	got=$(con_first "$LOG" "$BOOT_FROM" 'Kernel command line:' | sed -n 's/.*rasputin\.slot=\([AB]\).*/\1/p')
 	[ "$got" = "$slot" ] || die "boot $n came up on slot '$got', want $slot"
 	say "boot $n: slot $slot"
 }
@@ -351,14 +358,17 @@ expect_healthy_new() {
 	expect_lease
 }
 # Boot 1 of an old-agent leg: the guard's MISMATCH, its repair context, and the
-# agent's outcome, all on the console with no shell.
+# agent's outcome, all on the console with no shell. What /overlay is in this
+# boot is logged, not asserted (F-888-25): on the field hardware the old kernel
+# could not mount the ext4 /overlay, but under QEMU's virtio disk 6.12.94 does,
+# and the repair must work either way. Boot 2 and the host-side ESP and grubenv
+# checks are what prove the repair.
 expect_repair_boot() { # expect_repair_boot <outcome>
 	wait_for "rasputin-kernel-match: MISMATCH running=$LEGACY_ID built-for=$NEW_ID" "$BOOT_DEADLINE" "the MISMATCH verdict" "$BOOT_FROM"
 	wait_for "outcome=$1" "$BOOT_DEADLINE" "the repair's outcome=$1 record" "$BOOT_FROM"
 	wait_for 'repair context: vfat=present' "$BOOT_DEADLINE" "the repair context" "$BOOT_FROM"
-	ctx=$(tail -n +"$BOOT_FROM" "$LOG" | tr -d '\r' | grep -m1 'repair context:')
-	case "$ctx" in *rootfs_data*|*"/overlay=ext4"*) die "the repair ran on the persistent overlay: $ctx" ;; esac
-	say "boot 1: MISMATCH, outcome=$1, $ctx"
+	ctx=$(con_first "$LOG" "$BOOT_FROM" 'repair context:')
+	say "boot 1: MISMATCH, outcome=$1; ${ctx#*repair context: }"
 }
 expect_boots() { # expect_boots <n>
 	[ "$(boots)" = "$1" ] || die "$(boots) kernel boots, want exactly $1"

@@ -9,7 +9,10 @@
 #   loads into the kernel it was built with. Until #888 the ESP carried ONE
 #   kernel shared by both slots, and an OTA replaced only the rootfs. dev.176
 #   moved the kernel from 6.12.94 to 6.12.112, so an OTA'd firewall booted the
-#   new rootfs on the old kernel: no NIC driver, no ext4 /overlay, offline.
+#   new rootfs on the old kernel. On the field hardware that meant no NIC
+#   driver and no ext4 /overlay, so the box was offline. (Which of those an
+#   old kernel lacks depends on what it has built in: under QEMU's virtio disk
+#   the 6.12.94 kernel mounts the ext4 /overlay itself.)
 #
 #   Each slot now has its own kernel on the ESP (vmlinuz-A, vmlinuz-B), and the
 #   rootfs carries its kernel at /boot/vmlinuz with its identity at
@@ -27,9 +30,10 @@
 # After the repair returns, one user.notice line records what the boot looked
 # like: whether vfat is now in /proc/filesystems (the agent loads it from
 # /boot/legacy-kmods when the old kernel lacks it) and what /overlay is. That
-# is what tells a person reading a console log why a repair failed, and it is
-# how the update smoke sees, with no shell, that the repair ran without the
-# persistent overlay.
+# is what tells a person reading a console log why a repair failed. The update
+# smoke logs it too, with no shell. The repair must work whether or not the old
+# kernel mounted the persistent /overlay: it did not on the field hardware, and
+# it does under QEMU.
 #
 # THE REPAIR, AND WHEN TO REBOOT
 #   repair-slot-boot exits 0 when it wrote the slot's kernel and re-armed the
@@ -143,7 +147,9 @@ overlay=$(awk '$2 == "/overlay" {m = $3 " from " $1} END {print m}' "$MOUNTS" 2>
 log 13 "repair context: vfat=$vfat in /proc/filesystems, /overlay=${overlay:-unmounted}"
 
 if [ "$rc" -eq 0 ]; then
-	reboot_now "repair-slot-boot finished on slot $slot; rebooting into its own kernel"
+	# Exit 0 is Repaired or Fallback, and the guard cannot tell which (the
+	# agent's outcome= line above says): the message must hold for both.
+	reboot_now "repair-slot-boot finished on slot $slot (outcome in the agent line above); rebooting: GRUB boots slot $slot on its own kernel if it was repaired, the other slot if it was marked bad"
 	exit 0
 fi
 
