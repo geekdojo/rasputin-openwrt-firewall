@@ -38,11 +38,18 @@ if [ "$(dd if="$f" bs=1 skip=514 count=4 2>/dev/null | tr -d '\000')" != "HdrS" 
 	exit 1
 fi
 
-# shellcheck disable=SC2046 # od prints two numbers; splitting them is the point
-set -- $(od -An -t u1 -j 526 -N 2 "$f")
-[ $# -eq 2 ] || { echo "kernel-id: $f: unreadable kernel_version field" >&2; exit 1; }
-off=$(( $1 + $2 * 256 + 512 ))
-text="$(dd if="$f" bs=1 skip="$off" count=512 2>/dev/null | tr '\000' '\n' | head -1)"
+# kernel_version: two bytes, little-endian, read into named fields.
+read -r lo hi extra <<FIELD
+$(od -An -t u1 -j 526 -N 2 "$f")
+FIELD
+case "${lo:-x}${hi:-x}${extra:-}" in
+	*[!0-9]*) echo "kernel-id: $f: unreadable kernel_version field" >&2; exit 1 ;;
+esac
+off=$(( lo + hi * 256 + 512 ))
+# sed, not head: head exits after one line, and a tr still writing then gets
+# EPIPE, which a shell that ignores SIGPIPE (GitHub Actions runners do) turns
+# into "tr: write error: Broken pipe" on stderr.
+text="$(dd if="$f" bs=1 skip="$off" count=512 2>/dev/null | tr '\000' '\n' | sed -n 1p)"
 release="${text%% *}"
 
 case "$text" in

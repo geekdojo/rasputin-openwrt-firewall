@@ -51,6 +51,11 @@ bzimage() {
 	put "$_f" "$_off" '%s\000' "$_banner"
 }
 
+# The SUT runs with SIGPIPE ignored, as on a GitHub Actions runner, and its
+# stderr is part of what is compared: a pipeline that dies noisily there must
+# fail here too.
+trap '' PIPE
+
 # expect_id <name> <file> <want>
 expect_id() {
 	got=$(sh "$SUT" "$2" 2>&1); rc=$?
