@@ -6,10 +6,14 @@
 # The fixture is the generic leg's console from release run 40623523907, the
 # run where the harness timed out on lines this console already held. It runs
 # the searches the way the runner does: under `set -euo pipefail`, with
-# SIGPIPE ignored, so a writer that outlives its reader gets EPIPE. The first
-# case shows that the old pipeline shape misses a line that is there on this
-# fixture; the rest show that console.sh finds what is there, finds nothing
-# when nothing is there, and returns the right line.
+# SIGPIPE ignored, so a writer that outlives its reader gets EPIPE. The cases
+# show that console.sh finds what is there, finds nothing when nothing is
+# there, and returns the right line.
+#
+# There is no red-before case for the old 'tail | tr | grep -q' shape. Release
+# run 40623523907 proves the defect, but whether that shape misses a present
+# line depends on scheduling (whether tr is still writing when grep exits), so
+# a case asserting the miss is itself flaky (F-888-28).
 #
 # Usage: bash scripts/test-update-smoke-console.sh
 trap '' PIPE
@@ -29,16 +33,6 @@ ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 no() { fail=$((fail + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2" >&2; }
 
 [ -s "$LOG" ] || { echo "test-update-smoke-console: no fixture at $LOG" >&2; exit 1; }
-
-# The premise: on this fixture the old shape reads a present line as absent.
-# The first kernel command line is at byte ~21k of ~105k, so tr still has more
-# than a pipe buffer to write when grep exits.
-if tail -n +1 "$LOG" | tr -d '\r' 2>/dev/null | grep -qE 'Kernel command line:'; then
-	no "the old 'tail | tr | grep -q' shape misses a present line (the fixture reproduces F-888-24)" \
-		"it found the line, so this fixture no longer reproduces the defect"
-else
-	ok "the old 'tail | tr | grep -q' shape misses a present line (the fixture reproduces F-888-24)"
-fi
 
 if con_has "$LOG" 1 'Kernel command line:'; then
 	ok "con_has finds the first kernel command line"
