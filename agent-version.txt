@@ -1240,5 +1240,22 @@
 #                        fetch-snort-rules.sh). The base bump changes the
 #                        kernel, so this image needs bench re-validation
 #                        before it ships.
-2026.10.4-dev.204
-sha256  b84d7421a57e084cb88ab3cb2441da0e9095aa42334cb655c3653e3644812bb1  rasputin-agent-2026.10.4-dev.204-linux-amd64.tar.gz
+#   2026.10.4-dev.205 (2026-10-27): geekdojo/geekdojo-brain#888, the firewall
+#                        OTA kernel fix. CP dev release v2026.10.4-dev.205,
+#                        built from CP main 0dc7883 (CP PR #505); the only
+#                        change against dev.204 is that PR. The openwrt-ab
+#                        backend now writes the inactive slot's own kernel and
+#                        its grub.cfg entry on OTA, so a slot boots the kernel
+#                        its kmods were built for instead of the ESP's single
+#                        shared kernel. Two new agent verbs: install-rootfs
+#                        and repair-slot-boot. The second, run at boot by
+#                        this image's kernel-match guard, repairs a slot an
+#                        older agent installed (its kernel does not match its
+#                        kmods). REQUIRED for this image's per-slot kernel
+#                        layout: an older agent leaves the new slot booting
+#                        the wrong kernel. sha256 taken verbatim from the
+#                        release's
+#                        rasputin-agent-2026.10.4-dev.205-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload unchanged from dev.204.
+2026.10.4-dev.205
+sha256  b5be2db52967aa9f73a98313dbdec0ded0fe74cba6b94e5c16863dfed192770e  rasputin-agent-2026.10.4-dev.205-linux-amd64.tar.gz
