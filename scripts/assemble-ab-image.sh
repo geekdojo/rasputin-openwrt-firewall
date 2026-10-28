@@ -8,7 +8,7 @@
 # script extracts the kernel + rootfs squashfs from it and hands them to genimage
 # with image/genimage.cfg, which assembles our GPT layout:
 #
-#   [ESP RASPUTINEFI: bootx64.efi + /boot/vmlinuz + /boot/grub/{grub.cfg,grubenv}]
+#   [ESP RASPUTINEFI: bootx64.efi + /boot/vmlinuz-{A,B} + /boot/grub/{grub.cfg,grubenv}]
 #   [seed RASPUTIN-FW (basic-data FAT, ships empty)]
 #   [rootfs-0 squashfs] [rootfs-1 squashfs (same at flash)] [rootfs_data]
 #
@@ -18,6 +18,24 @@
 # compute image pins its grub module set. We take only the KERNEL and ROOTFS
 # from ImageBuilder.
 #
+# PER-SLOT KERNELS (geekdojo/geekdojo-brain#888). A kernel and its rootfs are
+# one build, so each slot boots its own kernel (vmlinuz-A, vmlinuz-B; both the
+# same kernel at flash), and the OTA artifact carries the kernel it needs. The
+# rootfs squashfs gets a new top-level /boot, appended (not repacked) so every
+# ImageBuilder file stays byte-identical:
+#   /boot/vmlinuz                   this build's kernel, which the agent copies
+#                                   to the ESP as vmlinuz-<slot> on install
+#   /boot/grub.cfg                  image/grub.cfg, copied to the ESP likewise
+#   /boot/kernel-id                 "uname -r uname -v" of that kernel, for the
+#                                   kernel-match guard (scripts/kernel-id.sh)
+#   /boot/legacy-kmods/kernel-id    the 2026.10.3 field kernel's id, and
+#   /boot/legacy-kmods/6.12.94/*.ko its FAT modules, from
+#                                   scripts/fetch-legacy-kmods.sh: what lets the
+#                                   guard reach the ESP from a slot an older
+#                                   agent installed, still on the field kernel
+# The .rootfs keeps the size of ImageBuilder's partition, zero-padded.
+# scripts/check-bundle-kernel.sh checks the result.
+#
 # Outputs (in $OUT_DIR, default ./ab-out):
 #   rasputin-fw-n100-<ver>-ab.img.gz   — full A/B disk, initial flash
 #   rasputin-fw-n100-<ver>.rootfs      — bare rootfs squashfs, the OTA artifact
@@ -25,23 +43,31 @@
 #   rasputin-fw-n100-<ver>.rootfs.version  — version sidecar the agent reads
 #
 # Runner deps (ubuntu-latest): apt-get install -y genimage mtools fdisk \
-#   util-linux grub-common grub2-common grub-efi-amd64-bin
+#   util-linux grub-common grub2-common grub-efi-amd64-bin squashfs-tools
 #
 # Usage:
-#   ./scripts/assemble-ab-image.sh <path/to/openwrt-*-combined-efi.img> [version]
+#   ./scripts/assemble-ab-image.sh <path/to/openwrt-*-combined-efi.img> <version> <legacy-kmods-dir>
+#   (<legacy-kmods-dir> is the output of scripts/fetch-legacy-kmods.sh.)
 #   (pass the UNCOMPRESSED .img; the release workflow gunzips ImageBuilder's
 #    artifact first, same as the old patch-image-cmdline step did.)
 
 set -euo pipefail
 
-IMG="${1:?usage: $0 <combined-efi.img> [version]}"
-VERSION="${2:-${RASPUTIN_VERSION:-0.0.0-dev}}"
+USAGE="usage: $0 <combined-efi.img> <version> <legacy-kmods-dir>"
+IMG="${1:?$USAGE}"
+VERSION="${2:?$USAGE}"
+LEGACY="${3:?$USAGE}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/ab-out}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 [ -f "$IMG" ] || { echo "assemble-ab: $IMG not found" >&2; exit 1; }
+LEGACY_MODS="fat.ko vfat.ko nls_cp437.ko nls_iso8859-1.ko nls_utf8.ko"
+[ -s "$LEGACY/kernel-id" ] || { echo "assemble-ab: no legacy kernel id at $LEGACY/kernel-id; run scripts/fetch-legacy-kmods.sh first" >&2; exit 1; }
+for m in $LEGACY_MODS; do
+	[ -s "$LEGACY/6.12.94/$m" ] || { echo "assemble-ab: no legacy module $LEGACY/6.12.94/$m; run scripts/fetch-legacy-kmods.sh first" >&2; exit 1; }
+done
 mkdir -p "$OUT_DIR"
 
 echo "assemble-ab: input image $IMG"
@@ -70,15 +96,76 @@ dd if="$IMG" of="$INPUT/rootfs.squashfs" bs=512 skip="$P2_START" count="$P2_SECT
 echo "assemble-ab: extracted rootfs.squashfs ($(du -h "$INPUT/rootfs.squashfs" | cut -f1))"
 
 # --- 3. extract the kernel from the ESP -------------------------------------
-# OpenWrt x86-64 EFI keeps the kernel on the FAT ESP at /boot/vmlinuz.
+# OpenWrt x86-64 EFI keeps the kernel on the FAT ESP at /boot/vmlinuz. It is
+# staged once per slot: each slot boots its own copy (see the header).
 export MTOOLS_SKIP_CHECK=1
 mkdir -p "$INPUT/esp-stage/boot/grub" "$INPUT/esp-stage/EFI/BOOT"
-mcopy -i "$IMG@@$ESP_OFF" ::/boot/vmlinuz "$INPUT/esp-stage/boot/vmlinuz" || {
+KERNEL="$WORK/vmlinuz"
+mcopy -i "$IMG@@$ESP_OFF" ::/boot/vmlinuz "$KERNEL" || {
 	echo "assemble-ab: no ::/boot/vmlinuz on the ESP — layout changed?" >&2
 	mdir -i "$IMG@@$ESP_OFF" ::/boot/ >&2 || true
 	exit 1
 }
-echo "assemble-ab: extracted kernel ($(du -h "$INPUT/esp-stage/boot/vmlinuz" | cut -f1))"
+cp "$KERNEL" "$INPUT/esp-stage/boot/vmlinuz-A"
+cp "$KERNEL" "$INPUT/esp-stage/boot/vmlinuz-B"
+KERNEL_ID="$("$REPO_ROOT/scripts/kernel-id.sh" "$KERNEL")"
+echo "assemble-ab: extracted kernel ($(du -h "$KERNEL" | cut -f1)), id '$KERNEL_ID', staged as vmlinuz-A and vmlinuz-B"
+
+# --- 3b. append the slot's boot payload to the rootfs squashfs ---------------
+# Appended, not repacked, so ImageBuilder's files keep their bytes. The extract
+# is ImageBuilder's whole partition: cut it to the squashfs's bytes_used (u64
+# LE at offset 40 of the superblock) so mksquashfs appends after the real end,
+# then pad back to the partition size, as the .rootfs has always been.
+ORIG="$WORK/imagebuilder.squashfs"
+mv "$INPUT/rootfs.squashfs" "$ORIG"
+ORIG_SIZE=$(stat -c%s "$ORIG")
+BYTES_USED=$(od -An -t u8 -j 40 -N 8 "$ORIG" | tr -d ' ')
+[ -n "$BYTES_USED" ] && [ "$BYTES_USED" -gt 0 ] && [ "$BYTES_USED" -le "$ORIG_SIZE" ] || {
+	echo "assemble-ab: unreadable squashfs bytes_used ($BYTES_USED) in a $ORIG_SIZE-byte rootfs" >&2; exit 1
+}
+PAYLOAD="$WORK/payload"
+mkdir -p "$PAYLOAD/boot/legacy-kmods/6.12.94"
+cp "$KERNEL" "$PAYLOAD/boot/vmlinuz"
+cp "$REPO_ROOT/image/grub.cfg" "$PAYLOAD/boot/grub.cfg"
+printf '%s\n' "$KERNEL_ID" > "$PAYLOAD/boot/kernel-id"
+cp "$LEGACY/kernel-id" "$PAYLOAD/boot/legacy-kmods/kernel-id"
+for m in $LEGACY_MODS; do cp "$LEGACY/6.12.94/$m" "$PAYLOAD/boot/legacy-kmods/6.12.94/$m"; done
+head -c "$BYTES_USED" "$ORIG" > "$INPUT/rootfs.squashfs"
+mksquashfs "$PAYLOAD" "$INPUT/rootfs.squashfs" -all-root -no-xattrs -no-progress >/dev/null
+NEW_SIZE=$(stat -c%s "$INPUT/rootfs.squashfs")
+[ "$NEW_SIZE" -le "$ORIG_SIZE" ] || {
+	echo "assemble-ab: the rootfs with its /boot payload is $NEW_SIZE bytes, more than the $ORIG_SIZE-byte partition" >&2; exit 1
+}
+truncate -s "$ORIG_SIZE" "$INPUT/rootfs.squashfs"
+
+# The append must ADD /boot and change nothing else. Checked here, where both
+# filesystems exist: the long listings (mode, owner, size, mtime, link target,
+# device numbers) differ by exactly the payload, and every extracted file is
+# byte-identical. Device nodes cannot be created unprivileged, so they are
+# compared by listing only.
+# Listing lines with the path made absolute, minus the root directory (its
+# own entry gains a child) and /boot (the payload, checked on its own).
+listing() { unsquashfs -lln "$1" | sed 's| squashfs-root| |' | grep -vE ' (/boot(/.*)?)?$' || true; }
+listing "$ORIG" > "$WORK/orig.lst"
+listing "$INPUT/rootfs.squashfs" > "$WORK/new.lst"
+diff -u "$WORK/orig.lst" "$WORK/new.lst" || { echo "assemble-ab: the append changed ImageBuilder's file metadata" >&2; exit 1; }
+unsquashfs -l "$INPUT/rootfs.squashfs" | sed -n 's|^squashfs-root/boot|/boot|p' | sort > "$WORK/added.lst"
+printf '%s\n' /boot /boot/grub.cfg /boot/kernel-id /boot/legacy-kmods /boot/legacy-kmods/6.12.94 \
+	/boot/legacy-kmods/kernel-id /boot/vmlinuz > "$WORK/want.lst"
+for m in $LEGACY_MODS; do echo "/boot/legacy-kmods/6.12.94/$m" >> "$WORK/want.lst"; done
+sort -o "$WORK/want.lst" "$WORK/want.lst"
+diff -u "$WORK/want.lst" "$WORK/added.lst" || { echo "assemble-ab: the appended /boot is not exactly the payload" >&2; exit 1; }
+SPECIAL=$(unsquashfs -lln "$ORIG" | awk '/^[bcps]/ {sub(/^.*squashfs-root\//, ""); print}')
+# shellcheck disable=SC2086 # one argument per special file
+unsquashfs -no-progress -d "$WORK/orig-tree" -excludes "$ORIG" $SPECIAL >/dev/null
+# shellcheck disable=SC2086
+unsquashfs -no-progress -d "$WORK/new-tree" -excludes "$INPUT/rootfs.squashfs" $SPECIAL >/dev/null
+if [ "$(diff -r --no-dereference "$WORK/orig-tree" "$WORK/new-tree")" != "Only in $WORK/new-tree: boot" ]; then
+	diff -r --no-dereference "$WORK/orig-tree" "$WORK/new-tree" | head -20 >&2
+	echo "assemble-ab: the append changed the content of ImageBuilder's files" >&2; exit 1
+fi
+rm -rf "$WORK/orig-tree" "$WORK/new-tree"
+echo "assemble-ab: appended /boot to the rootfs ($BYTES_USED -> $NEW_SIZE bytes used, padded to $ORIG_SIZE); every other file unchanged"
 
 # --- 4. build OUR grub EFI with the A/B module set embedded -----------------
 # prefix=/boot/grub → grub reads /boot/grub/grub.cfg from its boot device (the
