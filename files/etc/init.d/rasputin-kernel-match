@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+#
+# rasputin-kernel-match — once per boot, check the running kernel is the one
+# this rootfs was built with, and repair the slot's boot when it is not
+# (geekdojo/geekdojo-brain#893). The logic, and why, is in
+# /usr/lib/rasputin/kernel-match.sh.
+#
+# START=11: as early as it can be. Every boot it spends on a mismatched kernel
+# is a boot with no NIC driver, and the repair adds a reboot inside the update
+# saga's online deadline, so it runs right after rasputin-trust-clean (10) and
+# long before network (20) and the agent (90). It needs only the rootfs, /proc
+# and /dev/kmsg, all there since preinit. It does not need /overlay: on a
+# mismatched boot the ext4 module cannot load, so /overlay is RAM
+# (geekdojo/geekdojo-brain#888, F-888-07).
+START=11
+
+start() {
+	/usr/lib/rasputin/kernel-match.sh
+}

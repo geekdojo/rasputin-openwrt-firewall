@@ -11,10 +11,16 @@ name: release
 #   - detached CMS .sig signature, verified by rasputin-agent on the device
 #     (same YubiKey-rooted PKI as rasputin-os; see os-images/release-pipeline.md §3)
 #
+# Jobs: validate → build (incl. fetch-legacy-boot and check-boot-layout) →
+# smoke-fw, update-smoke (QEMU: published images updated to and from this
+# build, across kernel layouts) → sign → publish. Publishing needs every one of
+# them green (geekdojo/geekdojo-brain#893).
+#
 # Triggers:
 #   - push of a CalVer tag (e.g. 2026.07.1 or 2026.07.1-dev.1)
-#                                       → validate + build + smoke + sign+release
-#   - manual dispatch (full_build=true) → validate + build + smoke (no release, bench)
+#                                       → validate + build + smoke + update-smoke + sign + publish
+#   - manual dispatch (full_build=true) → validate + build + smoke + update-smoke
+#                                         (no signing, no release, bench)
 #   - manual dispatch (publish=true)    → build + sign + publish a dev release,
 #       versioned ${vars.RASPUTIN_VERSION}-dev.<run> (dev.N = run number). The
 #       release base comes from the org var RASPUTIN_VERSION, shared with
@@ -175,22 +181,15 @@ jobs:
       # The seed scrub blanks a credential during first-boot provisioning, and
       # ImageBuilder packages files/ verbatim without executing anything — a
       # broken scrub would build, sign and publish cleanly.
+      # skip-if-present, through the shared ci-debs action, as in ci.yml.
       - name: Ensure mkfs.vfat is available
-        timeout-minutes: 5
-        run: |
-          # Skip the package manager entirely when the tool is already here —
-          # which on the hosted images it usually is. apt is the slowest and by
-          # far the least reliable part of this job, so the best version of this
-          # step is the one that does nothing.
-          if command -v mkfs.vfat >/dev/null 2>&1; then
-            echo "dosfstools already present at $(command -v mkfs.vfat)"
-            exit 0
-          fi
-          # DPkg::Lock::Timeout so apt FAILS on a held lock instead of waiting
-          # on it forever, and DEBIAN_FRONTEND so nothing can stop for a prompt
-          # no one is there to answer.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 dosfstools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: dosfstools
+          packages: dosfstools
+          require: mkfs.vfat
+          skip-if-present: 'true'
 
       - name: Seed-scrub functional test
         timeout-minutes: 5
@@ -213,6 +212,46 @@ jobs:
         timeout-minutes: 5
         run: ./scripts/test-release-target-guard.sh
 
+      # The kernel-match guard decides, on a box that has just booted the wrong
+      # kernel, whether to repair and reboot: wrong one way and a slot-A box
+      # loops, wrong the other and a slot-B box sits offline instead of falling
+      # back. Every row, under dash, bash and busybox ash
+      # (geekdojo/geekdojo-brain#893, TC-893-15).
+      - name: Kernel-match guard tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-kernel-match.sh
+
+      # The kernel id the guard compares uname with, parsed from a bzImage
+      # header (TC-893-16).
+      - name: Kernel-id tests
+        timeout-minutes: 5
+        run: sh scripts/test-kernel-id.sh
+
+      # Real squashfs, GPT/FAT and grub-fstest fixtures for the two build-time
+      # gates below, through the shared ci-debs action (a package cache, and a
+      # speed floor on the mirror on a miss).
+      - name: Install boot-layout test tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: boot-layout-tests
+          packages: squashfs-tools mtools fdisk grub-common jq
+          require: mksquashfs unsquashfs mcopy mformat sfdisk grub-fstest jq
+
+      # The build's boot-layout gate must fail, naming the cause, on every way a
+      # release can boot the wrong kernel or none (TC-893-14).
+      - name: Boot-layout check tests
+        timeout-minutes: 5
+        run: sh scripts/test-check-boot-layout.sh
+
+      # The 2026.10.3 shared kernel and FAT modules: their fetch must refuse a
+      # bad signature, sha or pin, and verify at the signing time (TC-893-13).
+      - name: Legacy-boot fetch tests
+        timeout-minutes: 5
+        run: sh scripts/test-fetch-legacy-boot.sh
+
   build:
     needs: validate
     # full_build arrives as a real boolean from the UI checkbox but as the
@@ -220,6 +259,8 @@ jobs:
     # rasputin-os.)
     if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true')) }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -460,6 +501,30 @@ jobs:
             imagebuilder/dl
           key: ib-${{ hashFiles('scripts/init-imagebuilder.sh', 'packages.txt') }}
 
+      # The image tools for the steps below, from the shared ci-debs action: a
+      # package cache, and a speed floor on the mirror on a miss. A bare apt
+      # install has no bound that holds: 2026-08-19 lost 2.5 hours to an
+      # unbounded one, and on 2026-10-27 a mirror trickling at 37.6 kB/s
+      # outlasted a 10-minute step (apt has no minimum speed).
+      - name: Install image tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: image-tools
+          packages: genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin squashfs-tools jq
+          require: genimage mcopy sfdisk grub-mkimage grub-editenv grub-fstest unsquashfs mksquashfs jq
+
+      # The 2026.10.3 kernel (the ESP's shared fallback kernel, forever) and
+      # the 6.12.94 FAT modules the kernel-match guard needs to reach a field
+      # box's ESP, from the signed 2026.10.3 release, verified against the root
+      # CA this image bakes and pinned by sha256 (image/legacy-kernel.sha256,
+      # image/legacy-kmods.sha256). Fails closed (geekdojo/geekdojo-brain#893).
+      - name: Fetch the legacy boot files (2026.10.3)
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-legacy-boot.sh files/etc/rasputin/trust/root-ca.pem legacy-boot
+
       - name: Assemble A/B image (genimage post-process)
         timeout-minutes: 20
         run: |
@@ -467,16 +532,10 @@ jobs:
           ver="${{ steps.ver.outputs.version }}"
           # genimage re-lays-out ImageBuilder's single-rootfs image into our A/B
           # disk (ESP + rootfs-0/1 + rootfs_data). grub2 tools build our own EFI
-          # loader with the loadenv+test modules the boot-counter needs; mtools/
-          # fdisk/util-linux extract kernel+rootfs; genimage assembles.
-          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
-          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
-          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
-          # the smoke job, on top of a 28-minute one in ci.yml the same night.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            -o DPkg::Lock::Timeout=120 \
-            genimage mtools fdisk util-linux grub-common grub2-common grub-efi-amd64-bin
+          # loader with the modules the boot-counter and the slot kernels need;
+          # mtools/fdisk/util-linux extract kernel+rootfs; squashfs-tools append
+          # the kernel to the rootfs; genimage assembles. The tools come from
+          # "Install image tools".
           src=$(ls imagebuilder/bin/targets/x86/64/*squashfs-combined-efi.img.gz | head -1)
           test -n "$src" || { echo "::error::squashfs-combined-efi not produced"; exit 1; }
           # OpenWrt's combined-efi .img.gz has trailing NUL padding, so gunzip
@@ -487,7 +546,21 @@ jobs:
             echo "::error::gunzip failed with rc=$rc on $src"; exit "$rc"
           fi
           img="${src%.gz}"
-          RASPUTIN_VERSION="$ver" ./scripts/assemble-ab-image.sh "$img" "$ver"
+          ./scripts/assemble-ab-image.sh "$img" "$ver" legacy-boot
+
+      # Each slot boots the kernel its rootfs carries, and every piece of that
+      # agrees: the exact /boot payload, the ESP's EFI and grub.cfg equal to the
+      # payload's, the pinned shared kernel and no per-slot kernel on the ESP,
+      # kernel-id against the kernel, one /lib/modules tree, partitions 3 and 4,
+      # and grub-fstest reading the kernel back out of this .rootfs with GRUB's
+      # own squashfs code (geekdojo/geekdojo-brain#893, TC-893-17). Before
+      # staging, so a release that cannot boot its kernel is never uploaded.
+      - name: Check the boot layout
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          ver="${{ steps.ver.outputs.version }}"
+          ./scripts/check-boot-layout.sh "ab-out/rasputin-fw-n100-${ver}-ab.img.gz" "ab-out/rasputin-fw-n100-${ver}.rootfs"
 
       # Prove the baked rules parse under the Snort THIS image ships: extract
       # rootfs-0 from the A/B disk just assembled, chroot into it, apply the
@@ -499,9 +572,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          # Bounded apt, as above. fdisk (sfdisk) came in with the assemble step.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            -o DPkg::Lock::Timeout=120 squashfs-tools
+          # squashfs-tools and fdisk came in with "Install image tools".
           ver="${{ steps.ver.outputs.version }}"
           sudo ./scripts/rasputin-snort-rules-check.sh "ab-out/rasputin-fw-n100-${ver}-ab.img.gz"
 
@@ -544,42 +615,25 @@ jobs:
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
     steps:
+      # QEMU + OVMF through the shared ci-debs action: the exact .debs from
+      # actions/cache, and on a miss a download with a per-mirror speed floor
+      # (2026-10-27: a 37.6 kB/s mirror outlasted a 10-minute apt step; apt has
+      # no minimum-speed option).
       - name: Install QEMU + OVMF
         timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: qemu-ovmf
+          packages: qemu-system-x86 ovmf
+          require: qemu-system-x86_64
+      # OVMF is firmware, not a command, so `require` cannot see it.
+      - name: OVMF firmware is present
+        timeout-minutes: 2
         run: |
           set -eu
-          # Bounded apt: DPkg::Lock::Timeout so it FAILS on a held lock instead of
-          # waiting on it forever, DEBIAN_FRONTEND so nothing stops for a prompt.
-          # The 2026-08-19 firewall cut lost 2.5 hours to an unbounded apt-get in
-          # the smoke job, on top of a 28-minute one in ci.yml the same night.
-          if command -v qemu-system-x86_64 >/dev/null 2>&1 && [ -e /usr/share/OVMF/OVMF_CODE.fd ]; then
-            echo "qemu-system-x86 + ovmf already present"
-            exit 0
-          fi
-          # Acquire::* as well as DPkg::Lock::Timeout, because they cover
-          # DIFFERENT hangs and only the lock one was covered before. The lock
-          # timeout does nothing for a stalled mirror fetch, and a stalled fetch
-          # is what this step did twice on 2026-08-19 — ten minutes of silence,
-          # no output at all, while the SAME run's build job had installed its
-          # genimage packages through apt minutes earlier.
-          # Point apt at the Azure regional mirror before doing anything else.
-          # The runners live in Azure; archive.ubuntu.com is the canonical
-          # archive and is the thing that actually stalled here — on 2026-08-19
-          # this step fetched packages.microsoft.com and dl.google.com in
-          # milliseconds, reached archive.ubuntu.com, and then emitted NOTHING
-          # for nine and a half minutes until the step timeout. Acquire::*
-          # timeouts do not save you from a transfer that trickles rather than
-          # dies, so the fix is to stop asking the slow host.
-          # Noble uses deb822, older images the one-line format; rewrite both.
-          sudo sed -i 's|https\?://archive\.ubuntu\.com|http://azure.archive.ubuntu.com|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources \
-            /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          APT_OPTS="-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3"
-          APT_OPTS="$APT_OPTS -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          # -q not -qq: some output is what tells the next person WHERE it stalled.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -q $APT_OPTS
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
-            --no-install-recommends $APT_OPTS qemu-system-x86 ovmf
+          ls /usr/share/OVMF/OVMF_CODE*.fd >/dev/null 2>&1 \
+            || { echo "::error::no OVMF_CODE*.fd under /usr/share/OVMF after the install"; exit 1; }
+          qemu-system-x86_64 --version | head -1
       - uses: actions/download-artifact@v4
         with:
           pattern: fw-n100-*
@@ -615,25 +669,163 @@ jobs:
               -serial mon:stdio > /tmp/console.log 2>&1 ) &
           QPID=$!
           ok=0
+          # The banner, then the kernel-match guard's verdict: procd prints the
+          # console banner before rc reaches the guard at S11, so both are
+          # waited for (geekdojo/geekdojo-brain#893).
           for _ in $(seq 1 100); do
-            if grep -qE "Please press Enter to activate this console|BusyBox v[0-9]|procd: - init complete -" /tmp/console.log; then
+            if grep -qE "Please press Enter to activate this console|BusyBox v[0-9]|procd: - init complete -" /tmp/console.log \
+              && grep -q "rasputin-kernel-match: " /tmp/console.log; then
               ok=1; break
             fi
             sleep 2
           done
           kill "$QPID" 2>/dev/null || true
           echo "----- last 80 lines of console -----"; tail -80 /tmp/console.log || true
-          [ "$ok" = 1 ] || { echo "::error::firewall image did not reach OpenWrt banner in QEMU"; exit 1; }
+          [ "$ok" = 1 ] || { echo "::error::firewall image did not reach the OpenWrt banner and a kernel-match verdict in QEMU"; exit 1; }
           echo "OpenWrt firewall image booted in QEMU"
+          # A fresh image's slot A boots the kernel its own rootfs carries.
+          grep -q "rasputin-kernel-match: MATCH" /tmp/console.log \
+            || { echo "::error::no 'rasputin-kernel-match: MATCH' on the console: slot A did not boot the kernel its rootfs was built with"; exit 1; }
+          grep "rasputin-kernel-match:" /tmp/console.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: smoke-fw-console
           path: /tmp/console.log
 
+  # Which published image each update-smoke leg starts from
+  # (test/update-smoke.sh). The field legs always start from 2026.10.3: it is
+  # the layout every box flashed before geekdojo/geekdojo-brain#893 is on (one
+  # shared kernel on the ESP, a GRUB that cannot read a squashfs, an agent
+  # that writes no boot files). The generic leg starts from the newest
+  # published release, so once a release on the new layout exists it runs
+  # new to new (TC-893-24). The fresh leg needs no FROM. Its own job, so the
+  # matrix is data, decided once.
+  update-plan:
+    needs: validate
+    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.full_build == true || inputs.full_build == 'true' || inputs.publish == true || inputs.publish == 'true')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Pick the published images to update from
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIELD_BASE: "2026.10.3"
+        run: |
+          set -eu
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+            --json tagName,isDraft,publishedAt > releases.json
+          # Newest first, never this run's own tag.
+          newest=$(jq -r '[.[] | select(.isDraft | not)] | sort_by(.publishedAt) | reverse | .[].tagName' releases.json \
+            | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          test -n "$newest" || { echo "::error::no published release to update from"; exit 1; }
+          matrix=$(jq -nc --arg field "$FIELD_BASE" --arg newest "$newest" '{include: (
+              [{leg: "fresh", base: ""}]
+              + (["field-up-b", "field-up-a", "down", "repair-twice", "mixed-pair"] | map({leg: ., base: $field}))
+              + [{leg: "generic", base: $newest}]
+            )}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+  # Update and downgrade published images to and from this build in QEMU, and
+  # prove each boot runs the kernel its rootfs was built for: the fresh image,
+  # a 2026.10.3 box's one-time repair into either slot, the downgrade back,
+  # the repair's fallback, half-written EFI/grub.cfg pairs, and an update from
+  # the newest release (test/update-smoke.sh; read it for what each leg
+  # asserts and what it cannot prove). A red leg BLOCKS publish
+  # (geekdojo/geekdojo-brain#893, TC-893-25).
+  update-smoke:
+    needs: [build, update-plan]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.update-plan.result == 'success' }}
+    name: update-smoke (${{ matrix.leg }} ${{ matrix.base }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.update-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      # Hosted runners expose /dev/kvm to root only; the harness uses KVM when
+      # it can open it and TCG otherwise.
+      - name: Let the runner user open /dev/kvm
+        timeout-minutes: 2
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+          ls -l /dev/kvm || echo "no /dev/kvm: the smoke runs on TCG"
+      # Through the shared ci-debs action, bounded, as in smoke-fw above.
+      - name: Install QEMU + image tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: update-smoke-fw
+          packages: qemu-system-x86 ovmf mtools fdisk grub-common squashfs-tools jq
+          require: qemu-system-x86_64 mcopy sfdisk grub-editenv unsquashfs jq
+      # Three disk images of about 2.7 GB (this build's, the FROM, the working copy).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          df -h /
+      - uses: actions/download-artifact@v4
+        with:
+          name: fw-n100-${{ needs.build.outputs.version }}
+          path: new
+      - name: Decompress this build's image
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -eu
+          rc=0
+          gunzip -f "new/rasputin-fw-n100-${VERSION}-ab.img.gz" || rc=$?
+          # OpenWrt-derived images carry trailing NUL padding: gunzip exits 2.
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || { echo "::error::gunzip failed with rc=$rc"; exit 1; }
+      - name: Fetch the published image to update from
+        if: ${{ matrix.base != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ matrix.base }}
+        run: |
+          set -eu
+          mkdir -p old
+          gh release download "$BASE" --repo "$GITHUB_REPOSITORY" \
+            --pattern "rasputin-fw-n100-${BASE}-ab.img.gz" --dir old
+          rc=0
+          gunzip -f "old/rasputin-fw-n100-${BASE}-ab.img.gz" || rc=$?
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || { echo "::error::gunzip failed with rc=$rc"; exit 1; }
+          df -h .
+      - name: Update in QEMU
+        env:
+          LEG: ${{ matrix.leg }}
+          BASE: ${{ matrix.base }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -eu
+          set -- "$LEG" "new/rasputin-fw-n100-${VERSION}-ab.img" "new/rasputin-fw-n100-${VERSION}.rootfs"
+          [ -z "$BASE" ] || set -- "$@" "old/rasputin-fw-n100-${BASE}-ab.img"
+          test/update-smoke.sh "$@"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-smoke-${{ matrix.leg }}-console
+          path: /tmp/update-smoke/*/console.log
+
   sign-and-release:
-    needs: [build, smoke-fw]
-    # Publishes on a tag OR on a dispatch with publish=true (run-number dev release).
+    needs: [build, smoke-fw, update-smoke]
+    # Publishes on a tag OR on a dispatch with publish=true (run-number dev release),
+    # and only with the build (which includes check-boot-layout), the boot
+    # smoke and EVERY update-smoke leg green (geekdojo/geekdojo-brain#893,
+    # TC-893-25): success() below requires every job in `needs`.
     #
     # ⚠️ `success() &&`, not `!cancelled() &&`, and the difference is the whole
     # gate. GitHub implies success() ONLY when an `if:` contains no status-check
