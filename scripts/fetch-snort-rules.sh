@@ -236,7 +236,15 @@ TARBALL_NAME="snort3-community-rules.tar.gz"
 # under Snort 3.10.0.0 in firewall 2026.10.2) and published
 # sha256-d267a5081ab3.... (The mirror's intermediate sha256-2cfb41cc...,
 # 2026-10-21, was never pinned.)
-PINNED_SHA="d267a5081ab3694dcaf197ddd826f395d1384096ad57263d8f769da61cb8270f"
+# -> 969a2cedb243... (2026-10-29, 4024 active rules; a Talos republish).
+# Main's pin was stale: the release run on main at 2026-10-28 21:51 UTC
+# failed its freshness gate as designed. On 2026-10-29 upstream served
+# 969a2ced..., which the mirror did not yet hold (the mirror's 3beff4561e82...,
+# 2026-10-27, was never pinned on main). The mirror's rasputin-refresh.yml run 40888835358 verified it (two downloads,
+# five-member layout, 4024 active rules, snort-mgr -v check under Snort
+# 3.10.0.0) and published sha256-969a2cedb243.... Re-pinned for
+# geekdojo/geekdojo-brain#893.
+PINNED_SHA="969a2cedb243dfe771f6112b520864ad8613322a60fcd2831754f34497da5d44"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"
