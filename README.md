@@ -41,9 +41,10 @@ The firewall is deliberately x86-only: a Raspberry Pi can't be this node
   `files/` overlay. Reference hardware: CWWK x86-p5-n100.
 - **A/B slots + GRUB boot counter.** `scripts/assemble-ab-image.sh` extracts
   the kernel and rootfs squashfs from ImageBuilder's combined-EFI output,
-  builds a GRUB EFI with the `loadenv`/`test` modules the boot counter needs,
-  and assembles a GPT disk: ESP + two rootfs slots + a shared `rootfs_data`
-  partition. `/overlay` (all OpenWrt config) lives on the shared partition
+  appends the kernel to the rootfs under `/boot`, builds a GRUB EFI with the
+  `loadenv`/`test` modules the boot counter needs and the `squash4` reader
+  that boots each slot's kernel from its own squashfs, and assembles a GPT
+  disk: ESP + two rootfs slots + a shared `rootfs_data` partition. `/overlay` (all OpenWrt config) lives on the shared partition
   via extroot, so **configuration survives a slot switch**, and the data
   partition grows to fill the disk on first boot.
 - **Updates ride the control plane's normal update saga.** The OTA artifact
@@ -139,9 +140,13 @@ make image PROFILE=generic \
   EXTRA_IMAGE_NAME=rasputin
 cd ..
 
+# The pinned 2026.10.3 shared kernel and FAT modules, verified against the
+# root CA (needs GH_TOKEN for the download):
+./scripts/fetch-legacy-boot.sh rasputin-root-ca.pem legacy-boot
+
 # Re-layout into the A/B disk + OTA artifact:
 gunzip -k imagebuilder/bin/targets/x86/64/openwrt-*-rasputin-*-combined-efi.img.gz
-./scripts/assemble-ab-image.sh imagebuilder/bin/targets/x86/64/openwrt-*-combined-efi.img
+./scripts/assemble-ab-image.sh imagebuilder/bin/targets/x86/64/openwrt-*-combined-efi.img <version> legacy-boot
 # → ab-out/rasputin-fw-n100-<ver>-ab.img.gz   (flash this)
 # → ab-out/rasputin-fw-n100-<ver>.rootfs      (OTA artifact)
 ```

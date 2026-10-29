@@ -24,8 +24,11 @@
 ##   scripts/test-dhcp-auto.sh, scripts/test-seed-scrub.sh,
 ##   scripts/test-snort-rules-pin.sh, scripts/test-release-tag-guard.sh,
 ##   scripts/test-release-target-guard.sh, scripts/test-trust-clean.sh,
-##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs) and
-##   scripts/test-agent-pin.sh.
+##   scripts/test-trust-clean-overlay.sh (as root, against a real overlayfs),
+##   and scripts/test-agent-pin.sh.
+##   And the slot-kernel boot gates (geekdojo/geekdojo-brain#893):
+##   scripts/test-kernel-match.sh, scripts/test-kernel-id.sh,
+##   scripts/test-check-boot-layout.sh and scripts/test-fetch-legacy-boot.sh.
 ##   And the functional test of the image rules check (scripts/test-snort-rules-check.sh),
 ##   run against the latest stable image: release builds run that check on every image,
 ##   so a regression in it must surface on the PR, not at release time.
@@ -171,22 +174,20 @@ jobs:
       # downstream can tell "still working" from "wedged", and the PR merged
       # with that check still pending. An unbounded wait in CI is the same bug
       # as an unbounded wait anywhere else.
+      # skip-if-present: the hosted images usually ship mkfs.vfat, and apt is
+      # the slowest and least reliable part of this job, so the best version of
+      # this step is the one that does nothing. When it is missing, the shared
+      # ci-debs action installs it from a package cache, with a speed floor on
+      # the mirror (an apt install has no minimum speed: 2026-10-27, a 37.6 kB/s
+      # mirror lost a firewall build).
       - name: Ensure mkfs.vfat is available
-        timeout-minutes: 5
-        run: |
-          # Skip the package manager entirely when the tool is already here —
-          # which on the hosted images it usually is. apt is the slowest and by
-          # far the least reliable part of this job, so the best version of this
-          # step is the one that does nothing.
-          if command -v mkfs.vfat >/dev/null 2>&1; then
-            echo "dosfstools already present at $(command -v mkfs.vfat)"
-            exit 0
-          fi
-          # DPkg::Lock::Timeout so apt FAILS on a held lock instead of waiting
-          # on it forever, and DEBIAN_FRONTEND so nothing can stop for a prompt
-          # no one is there to answer.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 dosfstools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: dosfstools
+          packages: dosfstools
+          require: mkfs.vfat
+          skip-if-present: 'true'
 
       - name: Seed-scrub functional test
         timeout-minutes: 5
@@ -215,6 +216,45 @@ jobs:
         timeout-minutes: 5
         run: ./scripts/test-release-target-guard.sh
 
+      # The kernel-match guard decides, on a box that has just booted the wrong
+      # kernel, whether to repair and reboot: wrong one way and a slot-A box
+      # loops, wrong the other and a slot-B box sits offline instead of falling
+      # back. Every row, under dash, bash and busybox ash
+      # (geekdojo/geekdojo-brain#893, TC-893-15).
+      - name: Kernel-match guard tests
+        timeout-minutes: 5
+        env:
+          REQUIRE_BUSYBOX: "1"
+        run: sh scripts/test-kernel-match.sh
+
+      # The kernel id the guard compares uname with, parsed from a bzImage
+      # header (TC-893-16).
+      - name: Kernel-id tests
+        timeout-minutes: 5
+        run: sh scripts/test-kernel-id.sh
+
+      # Real squashfs, GPT/FAT and grub-fstest fixtures for the two build-time
+      # gates below, through the shared ci-debs action.
+      - name: Install boot-layout test tools
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: boot-layout-tests
+          packages: squashfs-tools mtools fdisk grub-common jq
+          require: mksquashfs unsquashfs mcopy mformat sfdisk grub-fstest jq
+
+      # The build's boot-layout gate must fail, naming the cause, on every way a
+      # release can boot the wrong kernel or none (TC-893-14).
+      - name: Boot-layout check tests
+        timeout-minutes: 5
+        run: sh scripts/test-check-boot-layout.sh
+
+      # The 2026.10.3 shared kernel and FAT modules: their fetch must refuse a
+      # bad signature, sha or pin, and verify at the signing time (TC-893-13).
+      - name: Legacy-boot fetch tests
+        timeout-minutes: 5
+        run: sh scripts/test-fetch-legacy-boot.sh
+
   apply-seed:
     name: Seed to agent environment (functional)
     runs-on: ubuntu-latest
@@ -222,16 +262,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Through the shared ci-debs action: a package cache, and a speed floor
+      # on the mirror when the tools are missing (they usually are not).
       - name: Ensure unsquashfs and sfdisk are available
-        timeout-minutes: 5
-        run: |
-          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
-            echo "squashfs-tools + fdisk already present"
-            exit 0
-          fi
-          # Bounded: fail on a held lock instead of waiting forever.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-fdisk
+          packages: squashfs-tools fdisk
+          require: unsquashfs sfdisk
+          skip-if-present: 'true'
 
       # This branch's files/ over the latest stable image's rootfs, under chroot:
       # the real busybox sources the seed, the real uci stores it, and the real
@@ -256,16 +296,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Through the shared ci-debs action: a package cache, and a speed floor
+      # on the mirror when the tools are missing (they usually are not).
       - name: Ensure unsquashfs and sfdisk are available
-        timeout-minutes: 5
-        run: |
-          if command -v unsquashfs >/dev/null 2>&1 && command -v sfdisk >/dev/null 2>&1; then
-            echo "squashfs-tools + fdisk already present"
-            exit 0
-          fi
-          # Bounded, as above: fail on a held lock instead of waiting forever.
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=120
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o DPkg::Lock::Timeout=120 squashfs-tools fdisk
+        timeout-minutes: 10
+        uses: geekdojo/.github/.github/actions/ci-debs@d7072ebcd16ca3569f19669550e384db8208d4eb
+        with:
+          label: squashfs-fdisk
+          packages: squashfs-tools fdisk
+          require: unsquashfs sfdisk
+          skip-if-present: 'true'
 
       # Runs the REAL rules check (extract rootfs-0, chroot, snort-mgr -v check)
       # against the latest stable image: its own rules must pass; a broken rule,
