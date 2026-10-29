@@ -1198,5 +1198,17 @@
 #                        moved since dev.167. Snort rules pin unchanged at
 #                        d267a508 (pre-flight run 168's freshness gate passed,
 #                        2026-10-26).
-2026.10.3
-sha256  affae8e6e6a661e16cf98463afc5d0594b7c12bd7228a0085a8163f0fd909f4b  rasputin-agent-2026.10.3-linux-amd64.tar.gz
+#   2026.10.5-dev.207 (2026-10-29): dev pin for geekdojo/geekdojo-brain#893
+#                        (firewall kernel boots from the slot squashfs). Built
+#                        from CP main e02a349, the merge of
+#                        rasputin-control-plane#506: the agent no longer writes
+#                        kernels to the ESP, installs of bundles without /boot
+#                        work again, and repair-slot-boot now writes the GRUB
+#                        EFI and grub.cfg from the running rootfs. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.5-dev.207-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: OpenWrt 25.12.6 and the boot
+#                        layout change on this branch. Snort rules re-pinned on
+#                        this branch to 969a2ced.
+2026.10.5-dev.207
+sha256  80d92d93d9aa83cc8839eaa690aca3c4da2891398f1d4ef07774428acd0f6cf9  rasputin-agent-2026.10.5-dev.207-linux-amd64.tar.gz
