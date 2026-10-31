@@ -1230,5 +1230,17 @@
 #                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
 #                        feed. Snort rules pin unchanged at 969a2ced (upstream
 #                        still matches, 2026-10-31).
-2026.10.5-dev.209
-sha256  9590ceb495b1aa7b422d113f18fc7242c14475b1c492de9f5777e2dcec7354de  rasputin-agent-2026.10.5-dev.209-linux-amd64.tar.gz
+#   2026.10.5-dev.210 (2026-10-31): dev pin for the #718 follow-on chain
+#                        (#783 app-secret lifecycle, #902 release-asset gate,
+#                        #903 restore run reconcile). Built from CP main
+#                        1c5225b, which adds rasputin-control-plane#513-#515.
+#                        Agent change against dev.209: the docker handler gains
+#                        compose removal for app delete (#783). sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.5-dev.210-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed (canary #123: kernel 6.12.94 -> 6.12.112,
+#                        dnsmasq-full 2.93-r2, LuCI). Snort rules pin unchanged
+#                        at 969a2ced (upstream still matches, 2026-10-31).
+2026.10.5-dev.210
+sha256  58e274219597183241c100009903998e8e73d06af9271fea8617da7f84d7bc2f  rasputin-agent-2026.10.5-dev.210-linux-amd64.tar.gz
