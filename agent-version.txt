@@ -1219,5 +1219,16 @@
 #                        .tar.gz.hash asset. Rebuild payload: the #893 boot
 #                        layout and OpenWrt 25.12.6 already on main. Snort rules
 #                        pin unchanged at 969a2ced.
-2026.10.5-dev.208
-sha256  23370d941491744fd8153f9dfc5ee2edd916d047dddb9ae1549c00925423282c  rasputin-agent-2026.10.5-dev.208-linux-amd64.tar.gz
+#   2026.10.5-dev.209 (2026-10-31): dev pin for the #718 bench chain
+#                        (feature geekdojo/geekdojo-brain#718, operator-supplied
+#                        app secrets). Built from CP main 5222b96, which adds
+#                        rasputin-control-plane#508-#512. No functional agent
+#                        change against dev.208 (one new agent test file,
+#                        agent/internal/docker/secretenv_empty_test.go). sha256
+#                        taken verbatim from the release's
+#                        rasputin-agent-2026.10.5-dev.209-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed. Snort rules pin unchanged at 969a2ced (upstream
+#                        still matches, 2026-10-31).
+2026.10.5-dev.209
+sha256  9590ceb495b1aa7b422d113f18fc7242c14475b1c492de9f5777e2dcec7354de  rasputin-agent-2026.10.5-dev.209-linux-amd64.tar.gz
