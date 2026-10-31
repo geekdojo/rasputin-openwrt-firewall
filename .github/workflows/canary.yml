@@ -571,7 +571,7 @@ jobs:
             --force
 
       - name: Open / update canary issue
-        if: ${{ !cancelled() && steps.decide.outputs.open_issue == 'true' }}
+        if: ${{ !cancelled() && steps.decide.outputs.open_issue == 'true' && steps.body.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
