@@ -1255,5 +1255,16 @@
 #                        2.93-r2, base-files, LuCI). Snort rules pin unchanged
 #                        at 969a2ced (pre-flight run 41251162651's freshness
 #                        gate passed, 2026-10-31).
-2026.10.5
-sha256  4787b1ee1638fe6778868aea2daa749fc2d4a11490abe45a31fe63a3c86ae286  rasputin-agent-2026.10.5-linux-amd64.tar.gz
+#   2026.10.6-dev.212 (2026-11-01): dev pin for the first 2026.10.6 dev chain
+#                        (rasputin-control-plane#516 store audit file to Loki,
+#                        #517 store health metrics and the "Secret store"
+#                        dashboard; rasputin-os#193). Built from CP main
+#                        3ddb62e. No functional agent change against the
+#                        2026.10.5 stable (no agent/ diff). sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.10.6-dev.212-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed. Snort rules pin unchanged at 969a2ced (upstream
+#                        still matches, 2026-11-01).
+2026.10.6-dev.212
+sha256  4ea0a031cc0b6859955928f766187a22349be506957bf43cab6ceda054ab00b6  rasputin-agent-2026.10.6-dev.212-linux-amd64.tar.gz
