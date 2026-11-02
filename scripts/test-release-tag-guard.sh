@@ -22,7 +22,11 @@
 #   The last check reads .github/workflows/release.yml: the guard looks for a
 #   step by NAME, so a renamed step would make every tag build fail — or worse,
 #   a guard updated without the workflow would pass nothing ever again. The name
-#   must appear exactly once.
+#   must appear exactly once. It also pins the main-only signing gate: the
+#   sign-and-release job's `if:` signs only on a pushed tag or a dispatch from
+#   main, and tag-guard carries the "Signing ref check" step that refuses
+#   publish=true from any other ref (geekdojo/geekdojo-brain#524). A dispatch
+#   from a branch that signed would look identical in the Actions UI.
 #
 # NEEDS: bash, jq.
 #
@@ -248,6 +252,23 @@ n="$(grep -cE "^[[:space:]]*-?[[:space:]]*name:[[:space:]]*\"?$GATE\"?[[:space:]
 build_block="$(awk '/^  build:$/{f=1; next} f && /^  [A-Za-z0-9_-]+:$/{f=0} f' "$SRC/.github/workflows/release.yml")"
 printf '%s\n' "$build_block" | grep -qE "name:[[:space:]]*\"?$GATE\"?[[:space:]]*\$" \
 	&& ok "the gate step lives in the \"build\" job" || bad "the gate step is not in the \"build\" job"
+
+echo "== only main or a pushed tag signs (geekdojo/geekdojo-brain#524)"
+job_block() { awk -v j="  $1:" '$0 == j {f=1; next} f && /^  [A-Za-z0-9_-]+:$/ {f=0} f' "$SRC/.github/workflows/release.yml"; }
+sign_if="$(job_block sign-and-release | grep -E '^    if:')"
+case "$sign_if" in
+	*"(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))"*) ok "sign-and-release signs a tag only on a push" ;;
+	*) bad "sign-and-release's if: does not scope the tag branch to event push: $sign_if" ;;
+esac
+case "$sign_if" in
+	*"github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && "*) ok "sign-and-release signs a dispatch only from main" ;;
+	*) bad "sign-and-release's if: does not limit dispatch signing to refs/heads/main: $sign_if" ;;
+esac
+check_if="$(job_block tag-guard | grep -A1 -E '^      - name: Signing ref check$' | grep -E '^        if:')"
+case "$check_if" in
+	*"github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'"*) ok "tag-guard runs the Signing ref check on every non-main dispatch" ;;
+	*) bad "tag-guard has no Signing ref check step guarded by a non-main dispatch: '$check_if'" ;;
+esac
 
 echo
 if [ "$fail" -eq 0 ]; then
