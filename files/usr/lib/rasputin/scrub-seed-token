@@ -32,8 +32,9 @@
 #   (files/etc/config/fstab), so an A/B update, its rollback, and a
 #   config-preserving sysupgrade never re-read the FAT; a layout-change
 #   sysupgrade or a full flash rewrites the whole disk including this
-#   partition anyway; and a removed-and-re-added firewall is re-seeded by the
-#   control plane's bootstrap_firewall job pushing seed.env directly.
+#   partition anyway; and a removed-and-re-added firewall gets a new seed from
+#   Add node, either written by a full flash or put in /etc/rasputin/seed.env
+#   over SSH before re-running apply-seed. Neither path reads the scrubbed FAT.
 #
 # IT MUST NEVER FAIL A PROVISION
 #   Deliberately NOT `set -e`, and every failure path logs and exits 0. A
