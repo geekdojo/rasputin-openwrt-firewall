@@ -21,10 +21,11 @@ name: release
 #                                       → validate + build + smoke + update-smoke + sign + publish
 #   - manual dispatch (full_build=true) → validate + build + smoke + update-smoke
 #                                         (no signing, no release, bench)
-#   - manual dispatch (publish=true)    → build + sign + publish a dev release,
-#       versioned ${vars.RASPUTIN_VERSION}-dev.<run> (dev.N = run number). The
-#       release base comes from the org var RASPUTIN_VERSION, shared with
-#       rasputin-os / -control-plane for lockstep. Implies full_build.
+#   - manual dispatch (publish=true), from main only → build + sign + publish a
+#       dev release, versioned ${vars.RASPUTIN_VERSION}-dev.<run> (dev.N = run
+#       number). The release base comes from the org var RASPUTIN_VERSION, shared
+#       with rasputin-os / -control-plane for lockstep. Implies full_build.
+#       Refused by tag-guard from any other ref (geekdojo/geekdojo-brain#524).
 #   - manual dispatch (full_build=false) → validate only (default, cheap)
 #
 # Tag builds need a PRE-FLIGHT first (geekdojo/geekdojo-brain#208):
@@ -88,6 +89,22 @@ jobs:
       - name: Not a tag build
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: echo "dispatch build — no tag guard; the freshness gate runs in the build job instead"
+
+      # Only main signs (as rasputin-app-catalog's publish job does). A dispatch
+      # runs the workflow and tree of whatever ref it names, and
+      # sign-and-release holds the release leaf. publish=true from another ref
+      # is refused here, before anything builds; validate needs this job, so
+      # the whole run stops. full_build never signed here, so it is unaffected
+      # (geekdojo/geekdojo-brain#524).
+      - name: Signing ref check
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            echo "::error::Refusing to publish from $GITHUB_REF. Dev releases are cut only from main (gh workflow run release.yml -f publish=true --ref main)."
+            exit 1
+          fi
 
   validate:
     needs: tag-guard
@@ -841,14 +858,13 @@ jobs:
     # signed and into the dev channel, where the control plane offered it as an
     # update to the firewall. A gate that reads like a gate and is not one is
     # worse than no gate, because the release notes say it booted.
-    if: ${{ success() && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true'))) }}
+    if: ${{ success() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.publish == true || inputs.publish == 'true'))) }}
     runs-on: ubuntu-latest
-    # The release signing credential lives in this repository's `signing`
-    # ENVIRONMENT, not in repository- or organisation-level secrets
-    # (geekdojo/geekdojo-brain#524). Naming the environment here is what makes
-    # its secrets reachable at all, and what makes its deployment-branch policy
-    # apply: a job that does not name it gets no leaf and fails the preflight
-    # rather than signing with something weaker.
+    # The leaf comes from the org secrets RASPUTIN_LEAF_* (selected repos: this
+    # one and rasputin-os). The `signing` environment holds no secret and has no
+    # branch policy (both deferred, geekdojo/geekdojo-brain#524). What keeps other
+    # refs from signing is the ref clause in `if:` above, and it is only as
+    # strong as the copy of this file on the dispatched ref.
     environment: signing
     permissions:
       contents: write
@@ -1099,19 +1115,21 @@ jobs:
             release-out/*
 
           # After publishing: prove the tag landed on the built commit, before
-          # the next step locks the release immutable. A tag this run created on
-          # the wrong commit is deleted with its release so nothing mis-tagged
-          # stays published (the dev.N name is burned; the next dispatch gets a
-          # new run number). A tag that existed before this step was pushed by a
-          # person and is never deleted. Only a proven mismatch (1) deletes; an
-          # unreadable remote fails without touching the release.
+          # the next step locks the release immutable. A release this run
+          # created on the wrong commit is deleted so nothing mis-tagged stays
+          # published. Its tag stays: the org ruleset release-tag-immutability
+          # blocks deleting or moving a CalVer tag, so --cleanup-tag fails on it
+          # and the version is burned (a dispatch's next run gets a new run
+          # number). A tag that existed before this step was pushed by a person
+          # and its release is never deleted. Only a proven mismatch (1)
+          # deletes; an unreadable remote fails without touching the release.
           rc=0
           ./scripts/release-target-guard.sh "$REPO_URL" "$TAG" "$TARGET_SHA" || rc=$?
           if [ "$rc" != 0 ]; then
             if [ "$rc" = 1 ] && [ "$created_tag" = true ]; then
-              echo "::error::deleting release $TAG and its tag: this run created them on the wrong commit"
+              echo "::error::Deleting release $TAG: this run created its tag on the wrong commit."
               gh release delete "$TAG" --cleanup-tag --yes \
-                || echo "::error::could not delete release $TAG; delete it and its tag by hand"
+                || echo "::error::Tag $TAG stays where it is, because CalVer tags cannot be deleted or moved (org ruleset release-tag-immutability). Check that release $TAG is gone (gh release view $TAG), delete it by hand if it is not, and cut the next version."
             fi
             exit 1
           fi
