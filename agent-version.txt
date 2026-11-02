@@ -1266,5 +1266,16 @@
 #                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
 #                        feed. Snort rules pin unchanged at 969a2ced (upstream
 #                        still matches, 2026-11-01).
-2026.10.6-dev.212
-sha256  4ea0a031cc0b6859955928f766187a22349be506957bf43cab6ceda054ab00b6  rasputin-agent-2026.10.6-dev.212-linux-amd64.tar.gz
+#   2026.10.6 (2026-11-02): STABLE 2026.10.6 (feature
+#                        geekdojo/geekdojo-brain#726: #802 store audit trail to
+#                        Loki, #939 store health metrics). Re-pinned from the
+#                        dev.212 prerelease to the CP STABLE v2026.10.6, built
+#                        from the same CP main 3ddb62e. No functional agent
+#                        change against dev.212. sha256 taken verbatim from the
+#                        release's rasputin-agent-2026.10.6-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed, as in firewall dev.193 (benched). Snort rules pin
+#                        unchanged at 969a2ced (pre-flight run 41380696938's
+#                        freshness gate passed, 2026-11-02).
+2026.10.6
+sha256  d8e731dffbe59b8e8f72486edf50b6f358e2654c8e572ae62fec6f604faf0f83  rasputin-agent-2026.10.6-linux-amd64.tar.gz
