@@ -1277,5 +1277,21 @@
 #                        feed, as in firewall dev.193 (benched). Snort rules pin
 #                        unchanged at 969a2ced (pre-flight run 41380696938's
 #                        freshness gate passed, 2026-11-02).
-2026.10.6
-sha256  d8e731dffbe59b8e8f72486edf50b6f358e2654c8e572ae62fec6f604faf0f83  rasputin-agent-2026.10.6-linux-amd64.tar.gz
+#   2026.11.0-dev.214 (2026-11-02): dev pin for the first 2026.11.0 dev chain
+#                        (feature geekdojo/geekdojo-brain#462: #529 one
+#                        publisher trust anchor, rasputin-control-plane PR
+#                        #523; flake fix PR #524; Dependabot PRs #518-#520).
+#                        Built from CP main 5af7a37 (run 41566266742). Agent
+#                        change against the 2026.10.6 stable: artifactsig now
+#                        ignores $RASPUTIN_TRUST_ROOT and --trust-root's env
+#                        default in a release build (-tags release), so the
+#                        shipped agent verifies only against the baked root;
+#                        plus nats-server 2.15.2, nats.go 1.55.0, gopsutil
+#                        4.26.10 and x/net 0.62.0. sha256 taken verbatim from
+#                        the release's
+#                        rasputin-agent-2026.11.0-dev.214-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed and firewall PR #129 (signing only from main or
+#                        a CalVer tag).
+2026.11.0-dev.214
+sha256  4598f99738472c191c7b6cb94d2121d42336d8bdaf5f7feac60ac817df559663  rasputin-agent-2026.11.0-dev.214-linux-amd64.tar.gz
