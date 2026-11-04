@@ -1293,5 +1293,15 @@
 #                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
 #                        feed and firewall PR #129 (signing only from main or
 #                        a CalVer tag).
-2026.11.0-dev.214
-sha256  4598f99738472c191c7b6cb94d2121d42336d8bdaf5f7feac60ac817df559663  rasputin-agent-2026.11.0-dev.214-linux-amd64.tar.gz
+#   2026.11.0-dev.215 (2026-11-04): dev pin for the shared 2026.11.0 dev chain
+#                        (features geekdojo/geekdojo-brain#464, #907 and #462:
+#                        rasputin-control-plane PRs #525, #526 and #527;
+#                        rasputin-os PR #201). Built from CP main 388dbfc (run
+#                        41756453447). No functional agent change against
+#                        dev.214: no commit since 5af7a37 touches agent/ or
+#                        proto/. sha256 taken verbatim from the release's
+#                        rasputin-agent-2026.11.0-dev.215-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
+#                        feed.
+2026.11.0-dev.215
+sha256  a565b04e3aee06a4e3028e7dfe0584da2508305b365179f2a9852a87a59e89c9  rasputin-agent-2026.11.0-dev.215-linux-amd64.tar.gz
