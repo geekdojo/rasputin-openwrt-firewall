@@ -1303,5 +1303,27 @@
 #                        rasputin-agent-2026.11.0-dev.215-linux-amd64.tar.gz.hash
 #                        asset. Rebuild payload: the rolling OpenWrt 25.12.6
 #                        feed.
-2026.11.0-dev.215
-sha256  a565b04e3aee06a4e3028e7dfe0584da2508305b365179f2a9852a87a59e89c9  rasputin-agent-2026.11.0-dev.215-linux-amd64.tar.gz
+#   2026.11.0 (2026-11-04): STABLE 2026.11.0 (features
+#                        geekdojo/geekdojo-brain#462, #464 and #907).
+#                        Re-pinned from the dev.215 prerelease to the CP
+#                        STABLE v2026.11.0, built from the same CP main
+#                        388dbfc. No functional agent change against dev.215.
+#                        Agent change against the 2026.10.6 stable (CP
+#                        v2026.10.6..v2026.11.0, agent/ and proto/): as in
+#                        dev.214, artifactsig ignores $RASPUTIN_TRUST_ROOT and
+#                        --trust-root's env default in a release build, so the
+#                        shipped agent verifies only against the baked root;
+#                        nats-server 2.15.2, nats.go 1.55.0, gopsutil 4.26.10,
+#                        x/net 0.62.0; plus a test-only enroll-deadline fix.
+#                        sha256 taken verbatim from the release's
+#                        rasputin-agent-2026.11.0-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload since stable 2026.10.6: firewall
+#                        PR #129 (signing only from main or a CalVer tag), the
+#                        Snort rules re-pin to b8a7e5ad (Talos republish
+#                        2026-11-03), and the rolling OpenWrt 25.12.6 feed: the
+#                        pre-flight's SBOM against 2026.10.6 moves libubox,
+#                        jshn, libblobmsg-json and libjson-script from
+#                        2026.06.19~7dd12784 to 2026.11.02~ff13b89e. Pre-flight
+#                        run 41960883415 on 59d25a8 passed its freshness gate.
+2026.11.0
+sha256  9d56c184db3f2abf1cb5a21c2d032eb62405b456ce91ffff7947391445b7c8f6  rasputin-agent-2026.11.0-linux-amd64.tar.gz
