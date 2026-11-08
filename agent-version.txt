@@ -1325,5 +1325,18 @@
 #                        jshn, libblobmsg-json and libjson-script from
 #                        2026.06.19~7dd12784 to 2026.11.02~ff13b89e. Pre-flight
 #                        run 41960883415 on 59d25a8 passed its freshness gate.
-2026.11.0
-sha256  9d56c184db3f2abf1cb5a21c2d032eb62405b456ce91ffff7947391445b7c8f6  rasputin-agent-2026.11.0-linux-amd64.tar.gz
+#   2026.11.1-dev.217 (2026-11-08): dev pin for the 2026.11.1 dev chain of
+#                        feature geekdojo/geekdojo-brain#910 (carries
+#                        rasputin-control-plane PR #529, geekdojo-brain#1065:
+#                        the POST /api/bmc/csr BMC CSR signing route, an api
+#                        change). Built from CP main a363312 (run
+#                        42506378162). No functional agent change against the
+#                        2026.11.0 stable: no commit in v2026.11.0..a363312
+#                        touches agent/ or proto/. sha256 taken verbatim from
+#                        the release's
+#                        rasputin-agent-2026.11.1-dev.217-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the Snort rules re-pin to
+#                        72eb1f34 (Talos republish 2026-11-05) and the rolling
+#                        OpenWrt 25.12.6 feed.
+2026.11.1-dev.217
+sha256  a4bdfa5dc81ff9ee3e1bf4e5be6c2cc9f18e31904343a4af8b87726a739c3bbd  rasputin-agent-2026.11.1-dev.217-linux-amd64.tar.gz
