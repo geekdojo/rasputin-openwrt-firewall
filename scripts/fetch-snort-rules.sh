@@ -262,7 +262,16 @@ TARBALL_NAME="snort3-community-rules.tar.gz"
 # failure only because its post-publish download readback got HTTP 504; the
 # published asset's digest matches and later refresh runs passed. Re-pinned
 # for the dev cut of geekdojo/geekdojo-brain#910.
-PINNED_SHA="72eb1f3408f81a4f67cbf2c2206d1397a77cc864f73eb4dfb7ee7bb99c1ee771"
+# -> db53371babaa... (2026-11-12, 4027 active rules; a Talos republish). It
+# went live on snort.org at 2026-11-10 23:16 UTC (the S3 object's
+# Last-Modified); main's pin was found stale by a pre-cut check of upstream
+# (upstream's sha256 measured db53371babaa...) before the dev chain for
+# geekdojo/geekdojo-brain#945. The mirror's rasputin-refresh.yml run
+# 43048331047 verified it (two downloads, five-member layout, 4027 active
+# rules, snort-mgr -v check under Snort 3.10.0.0 in firewall 2026.11.0) and
+# published sha256-db53371babaa.... Re-pinned for the dev cut of
+# geekdojo/geekdojo-brain#945.
+PINNED_SHA="db53371babaa8df878e0920893eaa44fa517c1999c77d2f40d4090ae433abf9f"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE_DIR="$REPO_ROOT/files/etc/snort"

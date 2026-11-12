@@ -1338,5 +1338,20 @@
 #                        asset. Rebuild payload: the Snort rules re-pin to
 #                        72eb1f34 (Talos republish 2026-11-05) and the rolling
 #                        OpenWrt 25.12.6 feed.
-2026.11.1-dev.217
-sha256  a4bdfa5dc81ff9ee3e1bf4e5be6c2cc9f18e31904343a4af8b87726a739c3bbd  rasputin-agent-2026.11.1-dev.217-linux-amd64.tar.gz
+#   2026.11.1-dev.218 (2026-11-12): dev pin for the 2026.11.1 dev chain of
+#                        feature geekdojo/geekdojo-brain#945 (E14, Identity
+#                        step 0; carries the OpenBao v2.7.2 pin,
+#                        rasputin-control-plane PR #536). Built from CP main
+#                        c0fe562 (run 43125634202). Agent change against
+#                        dev.217 (v2026.11.1-dev.217..c0fe562, agent/ and
+#                        proto/): dependency bumps only, from Dependabot
+#                        PR #538 (golang.org/x/sys 0.50.0, nats-io/jwt/v2
+#                        2.8.3, nats-io/nkeys 0.4.17), plus a test-only fix
+#                        to the proxy :443 race test (PR #537). sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.1-dev.218-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the Snort rules re-pin to
+#                        db53371b (Talos republish 2026-11-10) and the rolling
+#                        OpenWrt 25.12.6 feed.
+2026.11.1-dev.218
+sha256  e60b4d59438f2c3e7c6e842301d48e9562a8b6cd8ea68e8e364684c3db1ddafc  rasputin-agent-2026.11.1-dev.218-linux-amd64.tar.gz
