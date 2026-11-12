@@ -1353,5 +1353,30 @@
 #                        asset. Rebuild payload: the Snort rules re-pin to
 #                        db53371b (Talos republish 2026-11-10) and the rolling
 #                        OpenWrt 25.12.6 feed.
-2026.11.1-dev.218
-sha256  e60b4d59438f2c3e7c6e842301d48e9562a8b6cd8ea68e8e364684c3db1ddafc  rasputin-agent-2026.11.1-dev.218-linux-amd64.tar.gz
+#   2026.11.1 (2026-11-12): STABLE 2026.11.1 (feature
+#                        geekdojo/geekdojo-brain#945, E14 Identity step 0;
+#                        the OpenBao v2.7.2 pin). Re-pinned from the dev.218
+#                        prerelease to the CP STABLE v2026.11.1, tagged on the
+#                        same CP main c0fe562 (release run 43169393715). No
+#                        functional agent change against dev.218. Agent change
+#                        against the 2026.11.0 stable (CP
+#                        v2026.11.0..v2026.11.1, agent/ and proto/):
+#                        dependency bumps only, from Dependabot PR #538
+#                        (golang.org/x/sys 0.50.0, nats-io/jwt/v2 2.8.3,
+#                        nats-io/nkeys 0.4.17), plus a test-only fix to the
+#                        proxy :443 race test (PR #537). sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.1-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload since stable 2026.11.0: the
+#                        Snort rules re-pins to 72eb1f34 (Talos republish
+#                        2026-11-05) and db53371b (Talos republish
+#                        2026-11-10), and the rolling OpenWrt 25.12.6 feed:
+#                        the pre-flight's SBOM against 2026.11.0 moves
+#                        gperftools4 2.17.2-r4 to 2.19.2-r1, the LuCI
+#                        packages 26.304.26398~e969939 to
+#                        26.312.33065~9602dd9, and uhttpd and
+#                        uhttpd-mod-ubus 2026.08.24~373145f7 to
+#                        2026.11.05~93b05e0b. Pre-flight run 43163185350 on
+#                        4035aab passed its freshness gate.
+2026.11.1
+sha256  a7a58170477c91ee79d557453de81b39f3dca859e13253cd482315e5d9aec457  rasputin-agent-2026.11.1-linux-amd64.tar.gz
