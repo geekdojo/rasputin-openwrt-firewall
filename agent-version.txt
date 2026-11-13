@@ -1378,5 +1378,15 @@
 #                        uhttpd-mod-ubus 2026.08.24~373145f7 to
 #                        2026.11.05~93b05e0b. Pre-flight run 43163185350 on
 #                        4035aab passed its freshness gate.
-2026.11.1
-sha256  a7a58170477c91ee79d557453de81b39f3dca859e13253cd482315e5d9aec457  rasputin-agent-2026.11.1-linux-amd64.tar.gz
+#   2026.11.2-dev.220 (2026-11-13): first dev pin of the 2026.11.2 line,
+#                        carrying the shared identity sign-in vectors
+#                        (rasputin-control-plane PR #539, issue
+#                        geekdojo/geekdojo-brain#966). Built from CP main
+#                        70d8fc2a (run 43492913546). Agent change against the
+#                        2026.11.1 stable (v2026.11.1..70d8fc2a, agent/ and
+#                        proto/): none. sha256 taken verbatim from the
+#                        release's
+#                        rasputin-agent-2026.11.2-dev.220-linux-amd64.tar.gz.hash
+#                        asset.
+2026.11.2-dev.220
+sha256  aef166a706992760d76fb8f2b399ff557f820825141ee3650fcfe98246515908  rasputin-agent-2026.11.2-dev.220-linux-amd64.tar.gz
