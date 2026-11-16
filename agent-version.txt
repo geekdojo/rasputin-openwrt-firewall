@@ -1388,5 +1388,20 @@
 #                        release's
 #                        rasputin-agent-2026.11.2-dev.220-linux-amd64.tar.gz.hash
 #                        asset.
-2026.11.2-dev.220
-sha256  aef166a706992760d76fb8f2b399ff557f820825141ee3650fcfe98246515908  rasputin-agent-2026.11.2-dev.220-linux-amd64.tar.gz
+#   2026.11.2-dev.229 (2026-11-15): second dev pin of the 2026.11.2 line,
+#                        for the identity dev chain carrying
+#                        rasputin-control-plane PRs #542 (identity/ in the
+#                        api release), #546 (the app-identity switch) and
+#                        #547 (the app relay identity). Built from CP main
+#                        0ba301f7 (run 43798046708). Agent change against
+#                        2026.11.2-dev.220 (v2026.11.2-dev.220..0ba301f7,
+#                        agent/ and proto/): a TLS relay socket per granted
+#                        app, mounted into its containers (31d92ad8), and
+#                        the proto subjects and app fields it uses
+#                        (e6606d8e). The firewall runs no catalog apps, so
+#                        no functional change on Node N. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.2-dev.229-linux-amd64.tar.gz.hash
+#                        asset.
+2026.11.2-dev.229
+sha256  3717d77730e841b33d738606f904bc12c28689cef77f93951095edf2f56ab15e  rasputin-agent-2026.11.2-dev.229-linux-amd64.tar.gz
