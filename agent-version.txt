@@ -1426,5 +1426,21 @@
 #                        its package set equals the bench-proven
 #                        2026.11.2-dev.212's. Pre-flight run 43916175697 on
 #                        9ede04a passed its freshness gate.
-2026.11.2
-sha256  c148e9b3bba4afdc1171f75d1f7238a103704ea8f541eb85de79fef9ea558515  rasputin-agent-2026.11.2-linux-amd64.tar.gz
+#   2026.11.3-dev.231 (2026-11-18): first dev pin of the 2026.11.3 line,
+#                        for the dev chain carrying rasputin-control-plane
+#                        PRs #549 (identity.recover_admin on a fact), #553
+#                        (an app's own Transit keys through the relay,
+#                        geekdojo-brain#1084), #555 (the identity service's
+#                        register rows) and #556 (admin recovery through
+#                        the OS launcher). Built from CP main eca21e1f
+#                        (release run 44350570886). Agent change against
+#                        the 2026.11.2 stable (v2026.11.2..eca21e1f, agent/
+#                        and proto/): the app relay serves an app's own
+#                        Transit keys on a key identity of their own
+#                        (d7d0aca2). The firewall runs no catalog apps, so
+#                        no functional change on Node N. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.3-dev.231-linux-amd64.tar.gz.hash
+#                        asset.
+2026.11.3-dev.231
+sha256  8f4a52ef02ed29f3bd53f2296cb9b09a43a128d64e5ae5289b665c4560c36f0c  rasputin-agent-2026.11.3-dev.231-linux-amd64.tar.gz
