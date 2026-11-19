@@ -1442,5 +1442,20 @@
 #                        verbatim from the release's
 #                        rasputin-agent-2026.11.3-dev.231-linux-amd64.tar.gz.hash
 #                        asset.
-2026.11.3-dev.231
-sha256  8f4a52ef02ed29f3bd53f2296cb9b09a43a128d64e5ae5289b665c4560c36f0c  rasputin-agent-2026.11.3-dev.231-linux-amd64.tar.gz
+#   2026.11.3-dev.232 (2026-11-19): second dev pin of the 2026.11.3 line,
+#                        for the dev chain carrying rasputin-control-plane
+#                        PRs #557 (forget a key row the store refused to
+#                        create, F-1084-22) and #558 (roll pre-2026.11.3
+#                        stores forward without losing secrets,
+#                        geekdojo-brain#1132). Built from CP main 255c8ecb
+#                        (release run 44618229012). Agent change against
+#                        dev.231 (eca21e1f..255c8ecb, agent/ and proto/):
+#                        none; both PRs touch only the api and the shared
+#                        secret package, which the agent does not import.
+#                        No functional change on Node N. sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.3-dev.232-linux-amd64.tar.gz.hash
+#                        asset. The Snort rules re-pin to 0ea093e6 (Talos
+#                        republish 2026-11-19) rides this change.
+2026.11.3-dev.232
+sha256  025992dd1dc9657265c14ae2512afbfd5a837486e2093a35c51d6ae99749930b  rasputin-agent-2026.11.3-dev.232-linux-amd64.tar.gz
