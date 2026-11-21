@@ -5,8 +5,8 @@
 #
 # What's in /etc/rasputin/:
 #   - seed.env         operator-supplied controlplane URL + join token + bus pin
-#                      (delivered by the controlplane's bootstrap_firewall
-#                      job or hand-edited; MUST survive sysupgrade or
+#                      (staged from the RASPUTIN-FW seed FAT at first boot
+#                      or hand-edited; MUST survive sysupgrade or
 #                      every firmware update would reset the firewall
 #                      back to unconfigured state).
 #   - join.token       the bus join token, 0600, written by apply-seed from

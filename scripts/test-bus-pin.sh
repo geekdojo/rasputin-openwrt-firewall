@@ -6,9 +6,10 @@
 #   apply-seed refuses a seed whose RASPUTIN_BUS_PIN is malformed, and writes a
 #   valid one into UCI for the agent (geekdojo/geekdojo-brain#448). Its check
 #   has to agree with the agent's proto.ParseBusPin in both directions: a pin
-#   this accepts and the agent refuses reaches the box and silently dials
-#   plaintext, and a pin this refuses and the agent would accept leaves a box
-#   unprovisioned for nothing. The refusal vectors below are the agent's own
+#   this accepts and the agent refuses reaches the box and, with no other pin
+#   there, leaves the agent unable to dial the TLS-only bus at all; and a pin
+#   this refuses and the agent would accept leaves a box unprovisioned for
+#   nothing. The refusal vectors below are the agent's own
 #   (proto/buspin_test.go in rasputin-control-plane), plus the strict-base64
 #   case that a character-class check alone would miss.
 #

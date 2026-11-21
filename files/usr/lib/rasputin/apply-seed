@@ -3,11 +3,11 @@
 # apply-seed — read /etc/rasputin/seed.env (if present) and sync it into
 # /etc/config/rasputin (the UCI config the agent reads).
 #
-# Three call sites:
+# Two call sites:
 #   - First-boot uci-defaults/99-rasputin (runs once, may have no seed yet).
 #   - Operator workflow: edit /etc/rasputin/seed.env then run this script.
-#   - Controlplane bootstrap_firewall job: pushes the seed, then runs this
-#     remotely via the agent.
+# The control plane never runs it remotely: the old scp + apply-seed push was
+# removed, and Add node now delivers the seed on the RASPUTIN-FW seed FAT.
 #
 # Idempotent. A box that is not seeded yet (no seed, or a seed with no node id,
 # NATS URL or join token) is a no-op for /etc/config/rasputin and exits 0; the
@@ -219,12 +219,12 @@ fi
 # byte, and a "repaired" one is a different key.
 #
 # An invalid pin fails the apply before /etc/config/rasputin is touched, like
-# an invalid node id below. The agent's own fallback for a bad pin is to
-# report it and dial the bus in plaintext; applying the rest of this seed and
-# dropping the pin would provision the box into exactly that downgrade, which
-# is what the pin exists to prevent — and on a controlplane that already
-# requires TLS the box could then neither join nor be sent a pin. So stop here
-# and say why. A box that was already provisioned keeps its working config.
+# an invalid node id below. The agent skips a bad pin and reports it, and with
+# no other pin it does not dial the bus at all: the bus accepts only TLS
+# (geekdojo/geekdojo-brain#517). Applying the rest of this seed and dropping
+# the pin would provision a box that cannot join, with the reason only in the
+# agent's log. So stop here and say why. A box that was already provisioned
+# keeps its working config.
 BUS_PIN=$(rasputin_seed_trim "${RASPUTIN_BUS_PIN:-}")
 if [ -n "$BUS_PIN" ] && ! rasputin_bus_pin_valid "$BUS_PIN"; then
 	for msg in \
@@ -319,9 +319,10 @@ touch /etc/config/rasputin
 # The bus pin is the one value a blank seed does NOT overwrite. With no pin in
 # the seed (an older seed, or a hand-written one) nothing is written, per the
 # contract, and a pin this box already holds in UCI stays. A pin is trust
-# material and the bus never takes one back (a node refuses a different pin
-# delivered over it), so a seed that merely predates pins must not quietly
-# downgrade a pinned box to plaintext. A seed with a DIFFERENT valid pin does
+# material, and nothing delivers one over the bus any more
+# (geekdojo/geekdojo-brain#517), so a seed that merely predates pins must not
+# quietly take this box's pin away: with no pin the agent does not dial the
+# bus at all. A seed with a DIFFERENT valid pin does
 # replace it: that is an operator re-seeding on purpose. To remove a pin by
 # hand: uci delete rasputin.main.bus_pin && uci commit rasputin.
 BUS_PIN_UCI=

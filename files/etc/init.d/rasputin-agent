@@ -103,9 +103,10 @@ start_service() {
 	# The bus pin (geekdojo/geekdojo-brain#448): with it the agent dials the bus
 	# over TLS and accepts only the server key that hashes to it. Written to UCI
 	# by apply-seed, which has already refused a malformed one. Passed only when
-	# set: with no pin the agent falls back to the pin file a controlplane
-	# delivered into RASPUTIN_AGENT_STATE_DIR (below), and with neither it dials
-	# in plaintext as before.
+	# set: with no pin the agent falls back to the pin file an earlier agent
+	# saved in RASPUTIN_AGENT_STATE_DIR (below), and with neither it does not
+	# dial at all — the bus accepts only TLS (geekdojo/geekdojo-brain#517). It
+	# logs one FATAL entry and exits, and procd's respawn limit stops it.
 	[ -n "$bus_pin" ] && procd_append_param env RASPUTIN_BUS_PIN="$bus_pin"
 	# Trust root for verifying signed update images before sysupgrade.
 	procd_append_param env RASPUTIN_TRUST_ROOT=/etc/rasputin/trust/root-ca.pem
