@@ -43,3 +43,30 @@ rasputin_label_canon() {
 	_rl_v=${_rl_v%"${_rl_v##*[!$_rl_ws]}"}
 	printf '%s' "$_rl_v" | LC_ALL=C tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz'
 }
+
+# rasputin_cluster_id_check VALUE
+#   Print nothing and exit 0 when VALUE is a valid cluster id. Otherwise print
+#   the one sentence naming the rule it breaks and exit 1. A cluster id is a
+#   DNS label of at most 59 characters that does not start with sso-: every
+#   cluster signs in at sso-<cluster id>.local, and that name has to fit in one
+#   63-character label and must not be another cluster's sign-in name
+#   (geekdojo/geekdojo-brain#996). VALUE is expected already canonical
+#   (rasputin_label_canon). rasputin_label_valid is NOT tightened to match: it
+#   still checks node ids, which keep 63, and ids accepted before this rule.
+rasputin_cluster_id_check() {
+	if [ "${#1}" -gt 59 ]; then
+		printf '%s\n' "The cluster id '$1' is ${#1} characters, and a cluster id allows at most 59 so that its sign-in name, sso-<cluster id>.local, fits in one DNS label."
+		return 1
+	fi
+	if ! rasputin_label_valid "$1"; then
+		printf '%s\n' "The cluster id '$1' is not a DNS label: it may hold only a-z, 0-9 and -, and must not start or end with -."
+		return 1
+	fi
+	case "$1" in
+		sso-*)
+			printf '%s\n' "The cluster id '$1' starts with sso-, which is reserved for sign-in names: every cluster signs in at sso-<cluster id>.local, so this one would publish another cluster's sign-in name."
+			return 1
+			;;
+	esac
+	return 0
+}
