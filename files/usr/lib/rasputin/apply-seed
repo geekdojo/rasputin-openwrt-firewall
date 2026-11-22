@@ -15,8 +15,8 @@
 #
 # Exits 1, having applied nothing to /etc/config/rasputin, when the seed
 # carries a value that cannot be used as written: an invalid RASPUTIN_NODE_ID,
-# a NATS URL or join token with no RASPUTIN_NODE_ID, or an invalid
-# RASPUTIN_BUS_PIN. The SSH key is applied before those checks on purpose — it
+# a NATS URL or join token with no RASPUTIN_NODE_ID, an invalid
+# RASPUTIN_BUS_PIN, or a RASPUTIN_CLUSTER_ID that is not a valid cluster id. The SSH key is applied before those checks on purpose — it
 # is how the operator gets in to fix the seed.
 
 set -eu
@@ -303,6 +303,27 @@ if ! rasputin_label_valid "$NODE_ID"; then
 	exit 1
 fi
 
+# --- cluster id --------------------------------------------------------------
+# geekdojo/geekdojo-brain#996. Every cluster signs in at sso-<cluster id>.local,
+# so a cluster id is a DNS label of at most 59 characters that does not start
+# with sso-. Lowercased and trimmed like the node id; blank means the default,
+# rasputin. A refusal happens here, before /etc/config/rasputin and the join
+# token are touched, so a provisioned box keeps its working config and a fresh
+# one stays unprovisioned. An A/B slot update re-runs none of this, so a box
+# already holding a refused id keeps it.
+CLUSTER_ID=$(rasputin_label_canon "${RASPUTIN_CLUSTER_ID:-}")
+[ -n "$CLUSTER_ID" ] || CLUSTER_ID=rasputin
+if ! cluster_err=$(rasputin_cluster_id_check "$CLUSTER_ID"); then
+	for msg in \
+		"apply-seed: ERROR: $cluster_err" \
+		"apply-seed: Nothing was applied. Set RASPUTIN_CLUSTER_ID in $SEED to the cluster's id, or re-generate the seed with rasputin-provision, and run /usr/lib/rasputin/apply-seed again."
+	do
+		logger -t rasputin "$msg"
+		printf '%s\n' "$msg" >&2
+	done
+	exit 1
+fi
+
 # Ensure /etc/config/rasputin exists. UCI's `commit` writes to an
 # existing file but does NOT create one from scratch on first call —
 # discovered during the CWWK bring-up 2026-06-07 when apply-seed
@@ -386,7 +407,7 @@ set rasputin.main.node_role='${RASPUTIN_NODE_ROLE:-firewall}'
 set rasputin.main.nats_url='${RASPUTIN_NATS_URL:-}'
 set rasputin.main.join_token_file='${JOIN_TOKEN_FILE}'
 set rasputin.main.node_id='${NODE_ID}'
-set rasputin.main.cluster_id='${RASPUTIN_CLUSTER_ID:-rasputin}'
+set rasputin.main.cluster_id='${CLUSTER_ID}'
 ${BUS_PIN_UCI}
 commit rasputin
 EOF

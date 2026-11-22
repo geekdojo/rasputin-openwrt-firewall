@@ -45,6 +45,11 @@
 #     - when the token file cannot be written, the agent is still given only
 #       RASPUTIN_CP_JOIN_TOKEN_FILE, never the value; UCI keeps join_token so
 #       the next start retries, and a WARNING says the agent has no token.
+#   And for the cluster id (geekdojo/geekdojo-brain#996):
+#     - a cluster id over 59 characters, starting with sso-, or not a DNS label
+#       fails apply-seed with its own sentence on stderr and in the log, writes
+#       no /etc/config/rasputin and no join token, and leaves a provisioned box
+#       byte-identical; a valid one reaches UCI and the agent in canonical form.
 #
 # HOW
 #   1. rootfs-0 of a firewall A/B image is unsquashed (the latest STABLE
@@ -807,6 +812,131 @@ else
 	bad "second start:"; sed 's/^/      /' "$WORK/unwritable2.env" >&2
 fi
 rm -rf "$ROOT/etc/rasputin/not-a-dir"
+
+echo "12. the cluster id: at most 59 characters, a DNS label, not sso- (geekdojo/geekdojo-brain#996)"
+# Every cluster signs in at sso-<cluster id>.local, so apply-seed refuses a
+# cluster id that would not fit in one label or would be another cluster's
+# sign-in name, before anything is written. The sentences are the ones
+# rasputin-os prints, word for word.
+CID59=abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghi
+CID60="${CID59}j"
+CR=$(printf '\r')
+cs1() { printf "The cluster id '%s' is %s characters, and a cluster id allows at most 59 so that its sign-in name, sso-<cluster id>.local, fits in one DNS label." "$1" "$2"; }
+cs2() { printf "The cluster id '%s' starts with sso-, which is reserved for sign-in names: every cluster signs in at sso-<cluster id>.local, so this one would publish another cluster's sign-in name." "$1"; }
+cs3() { printf "The cluster id '%s' is not a DNS label: it may hold only a-z, 0-9 and -, and must not start or end with -." "$1"; }
+CID_ACTION="apply-seed: Nothing was applied. Set RASPUTIN_CLUSTER_ID in /etc/rasputin/seed.env to the cluster's id, or re-generate the seed with rasputin-provision, and run /usr/lib/rasputin/apply-seed again."
+
+# cid_seed VALUE — base_seed with RASPUTIN_CLUSTER_ID=VALUE, written as is.
+cid_seed() { base_seed | grep -v '^RASPUTIN_CLUSTER_ID='; printf 'RASPUTIN_CLUSTER_ID=%s\n' "$1"; }
+
+# apply_logged NAME — apply, with `logger` replaced by a stub that appends
+# "<tag>: <message>" to $WORK/NAME.log, so what apply-seed sends to the log is
+# checkable. There is no syslogd in a chroot to read it back from.
+LOG_STUB_DIR=/tmp/logger-stub
+apply_logged() {
+	mkdir -p "$ROOT$LOG_STUB_DIR"
+	printf '#!/bin/sh\nt=\n[ "$1" = -t ] && { t=$2; shift 2; }\nprintf "%%s: %%s\\n" "$t" "$*" >> %s/logger.out\n' "$LOG_STUB_DIR" > "$ROOT$LOG_STUB_DIR/logger"
+	chmod +x "$ROOT$LOG_STUB_DIR/logger"
+	rm -f "$ROOT$LOG_STUB_DIR/logger.out"
+	APPLY_RC=0
+	in_chroot /usr/bin/env "PATH=$LOG_STUB_DIR:/usr/sbin:/usr/bin:/sbin:/bin" "RASPUTIN_APPLY_SEED_AGENT=$APPLY_SEED_AGENT" \
+		/usr/lib/rasputin/apply-seed > "$WORK/$1.out" 2> "$WORK/$1.err" || APPLY_RC=$?
+	cp "$ROOT$LOG_STUB_DIR/logger.out" "$WORK/$1.log" 2>/dev/null || : > "$WORK/$1.log"
+}
+
+# checked_stub VALUE — an agent whose `seed check` passes the seed, with the
+# cluster id VALUE, as its normalized copy.
+checked_stub() {
+	agent_stub "cat <<'CHECKED'
+RASPUTIN_NODE_ROLE='firewall'
+RASPUTIN_NODE_ID='fw-test-1'
+RASPUTIN_CLUSTER_ID='$1'
+RASPUTIN_NATS_URL='nats://example-cluster.local:4222'
+RASPUTIN_CP_JOIN_TOKEN='deadbeefdeadbeefdeadbeefdeadbeef'
+CHECKED"
+}
+
+# TC-996-11: refused on a fresh box, with the agent and without it.
+for cidcase in "sso-x|S2" "$CID60|S1"; do
+	cid=${cidcase%|*}
+	case "${cidcase#*|}" in
+		S1) want="$(cs1 "$cid" 60)" ;;
+		S2) want="$(cs2 "$cid")" ;;
+	esac
+	for agentcase in agent none; do
+		label="TC-996-11 '$cid' ($agentcase)"
+		reset
+		if [ "$agentcase" = agent ]; then checked_stub "$cid"; else APPLY_SEED_AGENT=/usr/lib/rasputin/no-such-agent; fi
+		{ cid_seed "$cid"; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+		apply_logged cid-fresh
+		[ "$APPLY_RC" -eq 1 ] && ok "$label: apply-seed exits 1" || bad "$label: apply-seed exit $APPLY_RC, want 1"
+		if grep -qxF -- "apply-seed: ERROR: $want" "$WORK/cid-fresh.err" && grep -qxF -- "$CID_ACTION" "$WORK/cid-fresh.err"; then
+			ok "$label: stderr carries the sentence and the action line"
+		else
+			bad "$label: stderr is missing the sentence or the action line:"; sed 's/^/      /' "$WORK/cid-fresh.err" >&2
+		fi
+		if grep -qxF -- "rasputin: apply-seed: ERROR: $want" "$WORK/cid-fresh.log" && grep -qxF -- "rasputin: $CID_ACTION" "$WORK/cid-fresh.log"; then
+			ok "$label: logger -t rasputin carries the sentence and the action line"
+		else
+			bad "$label: the log is missing the sentence or the action line:"; sed 's/^/      /' "$WORK/cid-fresh.log" >&2
+		fi
+		[ ! -e "$UCI" ] && ok "$label: no /etc/config/rasputin" || { bad "$label: /etc/config/rasputin written:"; sed 's/^/      /' "$UCI" >&2; }
+		[ ! -e "$TOKEN_FILE" ] && ok "$label: no $JOIN_TOKEN_FILE" || bad "$label: $JOIN_TOKEN_FILE written"
+	done
+done
+APPLY_SEED_AGENT=/usr/lib/rasputin/no-such-agent
+
+# TC-996-12: a refused re-push leaves a provisioned box byte-identical. The
+# re-push also changes the URL and the token, so an applied batch would show.
+label="TC-996-12 re-push 'sso-x'"
+reset
+{ cid_seed bench; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply cid-provisioned
+[ "$APPLY_RC" -eq 0 ] && [ "$(uci_get rasputin.main.cluster_id)" = bench ] && ok "$label: provisioned with cluster id bench first" \
+	|| bad "$label: setup failed: exit $APPLY_RC, cluster_id '$(uci_get rasputin.main.cluster_id)'"
+cp "$UCI" "$WORK/cid-uci-before"; cp "$TOKEN_FILE" "$WORK/cid-token-before"
+{ cid_seed sso-x | sed -e 's#^RASPUTIN_NATS_URL=.*#RASPUTIN_NATS_URL=nats://changed.local:4222#' \
+	-e 's#^RASPUTIN_CP_JOIN_TOKEN=.*#RASPUTIN_CP_JOIN_TOKEN=feedfacefeedfacefeedfacefeedface#'; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+apply cid-repush
+[ "$APPLY_RC" -eq 1 ] && ok "$label: apply-seed exits 1" || bad "$label: apply-seed exit $APPLY_RC, want 1"
+cmp -s "$WORK/cid-uci-before" "$UCI" && ok "$label: /etc/config/rasputin byte-identical" \
+	|| { bad "$label: /etc/config/rasputin changed"; diff "$WORK/cid-uci-before" "$UCI" | sed 's/^/      /' >&2; }
+cmp -s "$WORK/cid-token-before" "$TOKEN_FILE" && ok "$label: $JOIN_TOKEN_FILE byte-identical" \
+	|| bad "$label: $JOIN_TOKEN_FILE changed"
+
+# TC-996-13: valid ids are applied in their canonical form, through to the
+# agent's environment. A blank id is the default, rasputin.
+for cidcase in "bench|bench" "rasputin|rasputin" "$CID59|$CID59" "Bench|bench" "bench$CR|bench" "|rasputin"; do
+	cid=${cidcase%|*}; want=${cidcase#*|}
+	label="TC-996-13 '$(printf '%s' "$cid" | sed 's/\r/\\r/')'"
+	reset
+	{ cid_seed "$cid"; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+	apply cid-ok
+	[ "$APPLY_RC" -eq 0 ] && ok "$label: apply-seed exits 0" || { bad "$label: apply-seed exit $APPLY_RC"; sed 's/^/      /' "$WORK/cid-ok.err" >&2; }
+	[ "$(uci_get rasputin.main.cluster_id)" = "$want" ] && ok "$label: UCI cluster_id is $want" \
+		|| bad "$label: UCI cluster_id '$(uci_get rasputin.main.cluster_id)', want '$want'"
+	agent_env > "$WORK/cid-ok.env" 2>&1
+	if grep -qx "RASPUTIN_CLUSTER_ID=$want" "$WORK/cid-ok.env" && grep -qx "#instance-closed" "$WORK/cid-ok.env"; then
+		ok "$label: the agent starts with RASPUTIN_CLUSTER_ID=$want"
+	else
+		bad "$label: agent environment has no RASPUTIN_CLUSTER_ID=$want instance:"; sed 's/^/      /' "$WORK/cid-ok.env" >&2
+	fi
+done
+
+# TC-996-14: a malformed id never reaches the UCI batch (SEC-INPUT). a'b is
+# double-quoted in the seed so the fallback's sourcing yields a'b itself.
+for cidcase in "home.lab|home.lab" "\"a'b\"|a'b"; do
+	cid=${cidcase%|*}; canon=${cidcase#*|}
+	label="TC-996-14 '$canon'"
+	reset
+	{ cid_seed "$cid"; printf 'RASPUTIN_BUS_PIN=%s\n' "$PIN"; } > "$SEED"
+	apply cid-malformed
+	[ "$APPLY_RC" -eq 1 ] && ok "$label: apply-seed exits 1" || bad "$label: apply-seed exit $APPLY_RC, want 1"
+	grep -qxF -- "apply-seed: ERROR: $(cs3 "$canon")" "$WORK/cid-malformed.err" && ok "$label: S3 on stderr" \
+		|| { bad "$label: no S3 on stderr:"; sed 's/^/      /' "$WORK/cid-malformed.err" >&2; }
+	[ ! -e "$UCI" ] && ok "$label: no /etc/config/rasputin" || { bad "$label: /etc/config/rasputin written:"; sed 's/^/      /' "$UCI" >&2; }
+done
+rm -rf "${ROOT:?}$LOG_STUB_DIR" "${ROOT:?}/usr/lib/rasputin/agent-stub"
 
 echo
 if [ "$fail" -eq 0 ]; then
