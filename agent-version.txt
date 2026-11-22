@@ -1457,5 +1457,31 @@
 #                        rasputin-agent-2026.11.3-dev.232-linux-amd64.tar.gz.hash
 #                        asset. The Snort rules re-pin to 0ea093e6 (Talos
 #                        republish 2026-11-19) rides this change.
-2026.11.3-dev.232
-sha256  025992dd1dc9657265c14ae2512afbfd5a837486e2093a35c51d6ae99749930b  rasputin-agent-2026.11.3-dev.232-linux-amd64.tar.gz
+#   2026.11.3 (2026-11-21): STABLE 2026.11.3 (the app runtime secrets
+#                        chain, geekdojo-brain#1077: rasputin-control-plane
+#                        PRs #555, #556, #557 and #558). Re-pinned from the
+#                        dev.232 prerelease to the CP STABLE v2026.11.3,
+#                        tagged on CP main 059a932d (release run
+#                        44969208411). No functional agent change against
+#                        dev.232 (255c8ecb..059a932d adds only the
+#                        capability register, PR #559, outside agent/ and
+#                        proto/). Agent change against the 2026.11.2 stable
+#                        (CP v2026.11.2..v2026.11.3, agent/ and proto/): the
+#                        app relay serves an app's own Transit keys on a
+#                        key identity of their own (d7d0aca2). The firewall
+#                        runs no catalog apps, so no functional change on
+#                        Node N. sha256 taken verbatim from the release's
+#                        rasputin-agent-2026.11.3-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload since stable 2026.11.2: the
+#                        Snort rules re-pin to 0ea093e6 (Talos republish
+#                        2026-11-19), and the rolling OpenWrt 25.12.6 feed:
+#                        the pre-flight's SBOM against 2026.11.2 moves
+#                        snort3 3.10.0.0 to 3.13.2.0, libdaq3 3.0.23 to
+#                        3.0.29, gperftools4 2.19.2 to 2.19.3, px5g-mbedtls
+#                        11 to 13, and the LuCI packages
+#                        26.317.52279~1c75ea4 to 26.324.77056~851d454, and
+#                        is otherwise identical. Pre-flight run 44964095889
+#                        on 882f520e passed its freshness gate, the Snort
+#                        rules check and every update smoke.
+2026.11.3
+sha256  0cc272db3638c80731e96a21cfc2b79b7dacb13fbcbd65f9a45260fdf2214b20  rasputin-agent-2026.11.3-linux-amd64.tar.gz
