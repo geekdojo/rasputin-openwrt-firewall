@@ -1483,5 +1483,27 @@
 #                        is otherwise identical. Pre-flight run 44964095889
 #                        on 882f520e passed its freshness gate, the Snort
 #                        rules check and every update smoke.
-2026.11.3
-sha256  0cc272db3638c80731e96a21cfc2b79b7dacb13fbcbd65f9a45260fdf2214b20  rasputin-agent-2026.11.3-linux-amd64.tar.gz
+#   2026.11.4-dev.238 (2026-11-27): first dev pin of the 2026.11.4 line, for
+#                        the dev chain cut from rasputin-control-plane main
+#                        dd5121dd (release run 45978967763), after CP PRs
+#                        #588, #578, #577, #608 and #579. Agent change
+#                        against the 2026.11.3 stable (v2026.11.3..dd5121dd,
+#                        agent/ and proto/): hostsync, which runs on Node N
+#                        (RASPUTIN_CP_HOSTS_DIR feeds dnsmasq), now also
+#                        publishes the home sign-in door sso-<cid>.local
+#                        beside <cid>.local (65ff022d,
+#                        geekdojo-brain#997), and the go-modules
+#                        bump in #579 (nats-server 2.15.3, nats.go 1.56.0,
+#                        x/net 0.63.0, x/crypto 0.59.0). Also in range:
+#                        the sign-in door table in clusterdns (3074d39f),
+#                        which does not start on Node N (no
+#                        /run/systemd), and tailscale up writing
+#                        --accept-dns/--accept-routes explicitly
+#                        (3019cd1c). sha256 taken
+#                        verbatim from the release's
+#                        rasputin-agent-2026.11.4-dev.238-linux-amd64.tar.gz.hash
+#                        asset. Rebuild payload: the Snort rules re-pin to
+#                        950899a8 (Talos republish 2026-11-25) and the
+#                        rolling OpenWrt 25.12.6 feed.
+2026.11.4-dev.238
+sha256  621dbc0acc7ec9b212c844524a848f458fbf07ef59e991c70cb27c9bb936be60  rasputin-agent-2026.11.4-dev.238-linux-amd64.tar.gz
